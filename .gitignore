@@ -1,0 +1,23 @@
+# Local environment files
+**/.env
+**/.env.*
+!/.env.example
+!/api/.env.example
+!/api/.env.docker.example
+!/api/.env.test
+!/web/.env.example
+
+# Dependencies
+node_modules/
+
+# Generated builds and reports
+/api/build/
+/api/.adonisjs/
+/web/dist/
+/coverage/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+*.swp
+.DS_Store

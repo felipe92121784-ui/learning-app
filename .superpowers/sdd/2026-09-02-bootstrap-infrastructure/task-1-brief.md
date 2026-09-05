@@ -1,0 +1,3 @@
+### Task 1: Preparar a infraestrutura da API para PostgreSQL e MinIO
+
+Read `docs/superpowers/plans/2026-09-02-bootstrap-infrastructure.md`, Task 1, as the authoritative requirements. Own only the files listed there under Task 1. Implement the migration from SQLite to PostgreSQL, explicit CORS allowlist, validated database/storage environment variables, and environment examples. Do not create any domain model or storage service. The repository does not have a valid writable Git repository: do not attempt commits; report all changes and test output in `task-1-report.md` instead. Treat configuration as TDD-exempt under the applicable skill, but run the required checks.

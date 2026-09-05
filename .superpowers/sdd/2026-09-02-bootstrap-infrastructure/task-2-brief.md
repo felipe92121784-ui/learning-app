@@ -1,0 +1,3 @@
+### Task 2: Criar o projeto Web independente
+
+Read `docs/superpowers/plans/2026-09-02-bootstrap-infrastructure.md`, Task 2, as the authoritative requirements. Own only `web/`. Create an independent React + TypeScript + Vite SPA with TanStack Router (file-based routing), TanStack Query, Tailwind CSS, shadcn/ui configuration, and a typed central API client driven by `VITE_API_URL`. Do not create auth persistence, domain features, or product routes. No `localStorage` access. There is no valid Git repository: do not attempt commits. Configuration/scaffold-generated files are exempt from TDD; any hand-written behavioral code needs an appropriate failing test first where feasible. Run typecheck/build and report full evidence in `task-2-report.md`. Do not use subagents.

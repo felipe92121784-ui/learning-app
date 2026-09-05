@@ -1,0 +1,10 @@
+/* eslint-disable react/only-export-components */
+import { createFileRoute, Outlet } from '@tanstack/react-router'
+
+export const Route = createFileRoute('/_admin/admin')({
+  component: AdminLayout,
+})
+
+function AdminLayout() {
+  return <Outlet />
+}

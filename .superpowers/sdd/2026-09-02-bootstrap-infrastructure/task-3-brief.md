@@ -1,0 +1,3 @@
+### Task 3: Adicionar o ambiente Docker e a documentação de inicialização
+
+Read `docs/superpowers/plans/2026-09-02-bootstrap-infrastructure.md`, Task 3, as the authoritative requirements. Own only the root files `docker-compose.yml`, `.env.example`, `.gitignore`, and `README.md`. Add exactly PostgreSQL and MinIO, persistent volumes, healthchecks, standard ports, and reproducible local setup documentation. Redis and app containers are out of scope. Use `node ace migration:run` in the README per the ledger ruling. Because no valid Git repository exists, do not attempt commits. Configuration/docs are TDD-exempt; validate with `docker compose --env-file .env.example config` and report all results in `task-3-report.md`. Do not use subagents.
