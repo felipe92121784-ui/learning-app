@@ -50,6 +50,7 @@ export default class ProtectedMaterialsController {
         ipAddress: request.ip(),
         userAgent: request.header('user-agent'),
       })
+      response.header('Cache-Control', 'private, no-store')
       return serialize(manifest)
     } catch (error) {
       return this.handleError(error, response, logger)

@@ -187,6 +187,7 @@ test.group('Protected material delivery', (group) => {
       session
     )
     manifest.assertStatus(200)
+    manifest.assertHeader('cache-control', 'private, no-store')
     assert.deepEqual(manifest.body().data, {
       width: 257,
       height: 256,
@@ -211,6 +212,13 @@ test.group('Protected material delivery', (group) => {
     assert.notDeepEqual(tileBody, source)
     const tileMetadata = await sharp(tileBody).metadata()
     assert.equal(tileMetadata.format, 'webp')
+    const sourcePixels = await sharp(source).raw().toBuffer()
+    const tilePixels = await sharp(tileBody).raw().toBuffer()
+    const changedChannels = tilePixels.reduce(
+      (count, channel, index) => count + (channel !== sourcePixels[index] ? 1 : 0),
+      0
+    )
+    assert.isAtLeast(changedChannels, 128)
     assert.lengthOf(await AccessLog.query().where('action', 'VIEW_MATERIAL'), 1)
 
     await viewRule.delete()

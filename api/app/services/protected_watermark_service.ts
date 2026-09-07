@@ -29,6 +29,12 @@ function createWatermarkSvg(width: number, height: number, label: string): strin
     throw new Error('Watermark dimensions must be positive integers')
   }
 
+  const tinyCanvasOverlay =
+    Math.min(width, height) < 64
+      ? `<rect width="100%" height="100%" fill="#111827" fill-opacity="0.24" />
+    <path d="M0 ${height} L${width} 0" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1" />`
+      : ''
+
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <defs>
     <pattern id="watermark" width="680" height="180" patternUnits="userSpaceOnUse" patternTransform="rotate(-30)">
@@ -36,6 +42,7 @@ function createWatermarkSvg(width: number, height: number, label: string): strin
     </pattern>
   </defs>
   <rect width="100%" height="100%" fill="url(#watermark)" />
+  ${tinyCanvasOverlay}
 </svg>`
 }
 
