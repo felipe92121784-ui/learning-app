@@ -2,10 +2,14 @@
 **/.env
 **/.env.*
 !/.env.example
+!/.env.production.example
 !/api/.env.example
 !/api/.env.docker.example
 !/api/.env.test
 !/web/.env.example
+
+# Zima production deployment secrets
+/.env.production
 
 # Dependencies
 node_modules/
