@@ -90,6 +90,14 @@ router
           controllers.ProtectedMaterials,
           'derivative',
         ])
+        router.get('materials/:materialId/tiles/manifest', [
+          controllers.ProtectedMaterials,
+          'tileManifest',
+        ])
+        router.get('materials/:materialId/tiles/:level/:column/:row', [
+          controllers.ProtectedMaterials,
+          'tile',
+        ])
         router.post('materials/:id/download-url', [controllers.ProtectedMaterials, 'downloadUrl'])
       })
       .use(middleware.auth({ guards: ['web'] }))

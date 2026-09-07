@@ -4,6 +4,7 @@ import Course from '#models/course'
 import CourseModule from '#models/course_module'
 import Material from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
+import ImageTileManifest from '#models/image_tile_manifest'
 import User from '#models/user'
 import AccessLogService from '#services/access_log_service'
 import MinioStorageProvider from '#services/minio_storage_provider'
@@ -11,6 +12,7 @@ import testUtils from '@adonisjs/core/services/test_utils'
 import type { ApiClient, ApiResponse } from '@japa/api-client'
 import { test } from '@japa/runner'
 import { Readable } from 'node:stream'
+import sharp from 'sharp'
 import {
   bootstrapCsrf,
   csrfSessionFrom,
@@ -81,6 +83,10 @@ test.group('Protected material delivery', (group) => {
     view.assertStatus(401)
     const derivative = await client.get(`/api/v1/materials/${material.id}/derivatives/${page.id}`)
     derivative.assertStatus(401)
+    const tileManifest = await client.get(`/api/v1/materials/${material.id}/tiles/manifest`)
+    tileManifest.assertStatus(401)
+    const tile = await client.get(`/api/v1/materials/${material.id}/tiles/0/0/0`)
+    tile.assertStatus(401)
     const csrf = await bootstrapCsrf(client)
     const download = await withCsrf(
       client.post(`/api/v1/materials/${material.id}/download-url`),
@@ -98,8 +104,10 @@ test.group('Protected material delivery', (group) => {
     const pdfPage = await createDerivative(pdf.id, 'PDF_PAGE', 'private/pdf-page.webp')
     const image = await createMaterial(module.id, 'IMAGE', 'READY')
     const preview = await createDerivative(image.id, 'IMAGE_PREVIEW', 'private/image-preview.webp')
-    objects.set(pdfPage.storageKey, Buffer.from('pdf-page-bytes'))
-    objects.set(preview.storageKey, Buffer.from('image-preview-bytes'))
+    const pdfSource = await webp(1200, 1600)
+    const previewSource = await webp(1200, 1600)
+    objects.set(pdfPage.storageKey, pdfSource)
+    objects.set(preview.storageKey, previewSource)
     await allow(student.id, pdf.id, 'VIEW')
     await allow(student.id, image.id, 'VIEW')
 
@@ -126,7 +134,10 @@ test.group('Protected material delivery', (group) => {
     page.assertHeader('content-type', 'image/webp')
     page.assertHeader('content-disposition', 'inline')
     page.assertHeader('cache-control', 'private, no-store')
-    assert.equal(Buffer.from(page.body()).toString('utf8'), 'pdf-page-bytes')
+    const pageBody = Buffer.from(page.body())
+    assert.notDeepEqual(pageBody, pdfSource)
+    const pageMetadata = await sharp(pageBody).metadata()
+    assert.equal(pageMetadata.format, 'webp')
     const viewLogs = await AccessLog.query().where('action', 'VIEW_MATERIAL').orderBy('id', 'asc')
     assert.deepEqual(
       viewLogs.map((log) => ({
@@ -140,6 +151,78 @@ test.group('Protected material delivery', (group) => {
         userAgent: 'protected-delivery-test',
       }))
     )
+  })
+
+  test('serves a safe tiled manifest and watermarked no-store tile while VIEW remains granted', async ({
+    assert,
+    client,
+  }) => {
+    session = await login(client, student)
+    const material = await createMaterial(module.id, 'IMAGE', 'READY')
+    const prefix = `derivatives/${material.id}/private-run/`
+    await ImageTileManifest.create({
+      materialId: material.id,
+      storagePrefix: prefix,
+      width: 257,
+      height: 256,
+      tileSize: 256,
+      minLevel: 0,
+      maxLevel: 8,
+    })
+    const tileKey = `${prefix}tiles/8/1/0.webp`
+    const source = await webp(1, 256)
+    objects.set(tileKey, source)
+    const viewRule = await allow(student.id, material.id, 'VIEW')
+
+    const view = await authenticatedGet(client, `/api/v1/materials/${material.id}/view`, session)
+    view.assertStatus(200)
+    assert.deepEqual(view.body().data.viewer, {
+      kind: 'IMAGE_TILES',
+      manifestUrl: `http://localhost:3333/api/v1/materials/${material.id}/tiles/manifest`,
+    })
+
+    const manifest = await authenticatedGet(
+      client,
+      `/api/v1/materials/${material.id}/tiles/manifest`,
+      session
+    )
+    manifest.assertStatus(200)
+    assert.deepEqual(manifest.body().data, {
+      width: 257,
+      height: 256,
+      tileSize: 256,
+      minLevel: 0,
+      maxLevel: 8,
+      tileUrlTemplate: `http://localhost:3333/api/v1/materials/${material.id}/tiles/{level}/{column}/{row}`,
+    })
+    assert.notInclude(JSON.stringify(manifest.body()), prefix)
+    assert.notInclude(JSON.stringify(manifest.body()), tileKey)
+
+    const tile = await authenticatedGet(
+      client,
+      `/api/v1/materials/${material.id}/tiles/8/1/0`,
+      session
+    )
+    tile.assertStatus(200)
+    tile.assertHeader('content-type', 'image/webp')
+    tile.assertHeader('content-disposition', 'inline')
+    tile.assertHeader('cache-control', 'private, no-store')
+    const tileBody = Buffer.from(tile.body())
+    assert.notDeepEqual(tileBody, source)
+    const tileMetadata = await sharp(tileBody).metadata()
+    assert.equal(tileMetadata.format, 'webp')
+    assert.lengthOf(await AccessLog.query().where('action', 'VIEW_MATERIAL'), 1)
+
+    await viewRule.delete()
+    const revoked = await authenticatedGet(
+      client,
+      `/api/v1/materials/${material.id}/tiles/8/1/0`,
+      session
+    )
+    revoked.assertStatus(403)
+    assert.notInclude(revoked.text(), tileKey)
+    assert.notInclude(revoked.text(), prefix)
+    assert.lengthOf(await AccessLog.query().where('action', 'FAILED_ACCESS'), 1)
   })
 
   test('keeps VIEW and DOWNLOAD independent, including after VIEW is revoked', async ({
@@ -349,4 +432,10 @@ function createDerivative(
     height: 1600,
     position: 0,
   })
+}
+
+function webp(width: number, height: number) {
+  return sharp({ create: { width, height, channels: 3, background: '#ffffff' } })
+    .webp()
+    .toBuffer()
 }

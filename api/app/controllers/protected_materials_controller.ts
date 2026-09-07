@@ -36,19 +36,42 @@ export default class ProtectedMaterialsController {
       response.header('Content-Type', derivative.mimeType)
       response.header('Content-Disposition', 'inline')
       response.header('Cache-Control', 'private, no-store')
-      derivative.stream.once('error', () => {
-        logger.error(
-          {
-            materialId: Number(params.materialId),
-            derivativeId: Number(params.derivativeId),
-          },
-          'Protected material stream failed'
-        )
+      return response.send(derivative.body)
+    } catch (error) {
+      return this.handleError(error, response, logger)
+    }
+  }
+
+  async tileManifest({ auth, params, request, response, serialize, logger }: HttpContext) {
+    try {
+      const manifest = await this.delivery.getTileManifest({
+        userId: auth.use('web').getUserOrFail().id,
+        materialId: parseRouteId(params.materialId, 'materialId'),
+        ipAddress: request.ip(),
+        userAgent: request.header('user-agent'),
       })
-      return response.stream(derivative.stream, () => [
-        JSON.stringify({ message: 'Unable to deliver protected material' }),
-        500,
-      ])
+      return serialize(manifest)
+    } catch (error) {
+      return this.handleError(error, response, logger)
+    }
+  }
+
+  async tile({ auth, params, request, response, logger }: HttpContext) {
+    try {
+      const tile = await this.delivery.getTile({
+        userId: auth.use('web').getUserOrFail().id,
+        materialId: parseRouteId(params.materialId, 'materialId'),
+        level: parseRouteCoordinate(params.level, 'level'),
+        column: parseRouteCoordinate(params.column, 'column'),
+        row: parseRouteCoordinate(params.row, 'row'),
+        ipAddress: request.ip(),
+        userAgent: request.header('user-agent'),
+      })
+
+      response.header('Content-Type', tile.mimeType)
+      response.header('Content-Disposition', 'inline')
+      response.header('Cache-Control', 'private, no-store')
+      return response.send(tile.body)
     } catch (error) {
       return this.handleError(error, response, logger)
     }
@@ -106,4 +129,18 @@ function parseRouteId(value: string, field: string) {
     ])
   }
   return id
+}
+
+function parseRouteCoordinate(value: string, field: string) {
+  const coordinate = Number(value)
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(coordinate) || coordinate > 2_147_483_647) {
+    throw new ValidationError([
+      {
+        message: `The ${field} field must be a valid non-negative integer`,
+        rule: 'number',
+        field,
+      },
+    ])
+  }
+  return coordinate
 }

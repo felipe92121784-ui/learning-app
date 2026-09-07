@@ -2,6 +2,7 @@ import Course from '#models/course'
 import CourseModule from '#models/course_module'
 import Material from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
+import ImageTileManifest from '#models/image_tile_manifest'
 import User from '#models/user'
 import ProtectedMaterialsController from '#controllers/protected_materials_controller'
 import type { AccessDecision, ResolveAccessInput } from '#services/access_control_service'
@@ -16,10 +17,11 @@ import type {
   PutObjectInput,
   StorageService,
 } from '#services/storage_service'
+import type { ProtectedWatermarkInput } from '#services/protected_watermark_service'
 import testUtils from '@adonisjs/core/services/test_utils'
 import { test } from '@japa/runner'
 import { DateTime } from 'luxon'
-import { PassThrough, Readable } from 'node:stream'
+import { Readable } from 'node:stream'
 import type { HttpContext } from '@adonisjs/core/http'
 
 const now = DateTime.fromISO('2026-09-06T12:00:00.000Z', { zone: 'utc' })
@@ -113,7 +115,11 @@ test.group('ProtectedMaterialDeliveryService', (group) => {
 
     const imageView = await service.getView(requestFor(student.id, image.id))
     assert.equal(imageView.viewer?.kind, 'IMAGE_PREVIEW')
-    assert.equal(imageView.viewer?.derivatives[0].id, preview.id)
+    assert.equal(
+      (imageView.viewer as { kind: 'IMAGE_PREVIEW'; derivatives: Array<{ id: number }> })
+        .derivatives[0].id,
+      preview.id
+    )
     assert.deepEqual(await service.getView(requestFor(student.id, zip.id)), {
       id: zip.id,
       title: zip.title,
@@ -151,7 +157,7 @@ test.group('ProtectedMaterialDeliveryService', (group) => {
     )
   })
 
-  test('rechecks VIEW for a matching derivative and never falls back to the original', async ({
+  test('rechecks VIEW for a matching derivative, watermarks it, and never falls back to the original', async ({
     assert,
   }) => {
     const { student, material, module } = await createHierarchy({ type: 'PDF' })
@@ -163,16 +169,26 @@ test.group('ProtectedMaterialDeliveryService', (group) => {
     const access = new FakeAccessControl({ VIEW: true, DOWNLOAD: false })
     const logs = new FakeAccessLog()
     const storage = new MemoryStorage()
+    const watermark = new FakeWatermark()
     storage.objects.set(page.storageKey, Buffer.from('protected-page'))
-    const service = makeService(access, logs, storage)
+    const service = makeService(access, logs, storage, watermark)
 
     const result = await service.getDerivative({
       ...requestFor(student.id, material.id),
       derivativeId: page.id,
     })
-    assert.equal(await streamText(result.stream), 'protected-page')
+    assert.equal(result.body.toString('utf8'), 'watermarked:protected-page')
     assert.equal(result.mimeType, 'image/webp')
     assert.deepEqual(storage.readKeys, [page.storageKey])
+    assert.deepEqual(watermark.inputs, [
+      {
+        width: 1200,
+        height: 1600,
+        fullName: 'Unknown user',
+        email: student.email,
+        occurredAt: now,
+      },
+    ])
     assert.lengthOf(logs.inputs, 0)
 
     await assert.rejects(
@@ -195,6 +211,143 @@ test.group('ProtectedMaterialDeliveryService', (group) => {
       ProtectedMaterialForbiddenError
     )
     assert.equal(logs.inputs.at(-1)?.action, 'FAILED_ACCESS')
+    assert.deepEqual(storage.readKeys, [page.storageKey])
+  })
+
+  test('returns only safe tile metadata and watermarks an authorized tile without another VIEW audit', async ({
+    assert,
+  }) => {
+    const { student, material } = await createHierarchy({ type: 'IMAGE' })
+    const prefix = `derivatives/${material.id}/hidden-run/`
+    await ImageTileManifest.create({
+      materialId: material.id,
+      storagePrefix: prefix,
+      width: 4097,
+      height: 257,
+      tileSize: 256,
+      minLevel: 0,
+      maxLevel: 13,
+    })
+    const access = new FakeAccessControl({ VIEW: true, DOWNLOAD: false })
+    const logs = new FakeAccessLog()
+    const storage = new MemoryStorage()
+    const watermark = new FakeWatermark()
+    const tileKey = `${prefix}tiles/13/16/1.webp`
+    storage.objects.set(tileKey, Buffer.from('private-edge-tile'))
+    const service = makeService(access, logs, storage, watermark)
+
+    const view = await service.getView(requestFor(student.id, material.id))
+    assert.deepEqual(view.viewer, {
+      kind: 'IMAGE_TILES',
+      manifestUrl: `http://api.example.test/api/v1/materials/${material.id}/tiles/manifest`,
+    })
+
+    const manifest = await service.getTileManifest(requestFor(student.id, material.id))
+    assert.deepEqual(manifest, {
+      width: 4097,
+      height: 257,
+      tileSize: 256,
+      minLevel: 0,
+      maxLevel: 13,
+      tileUrlTemplate: `http://api.example.test/api/v1/materials/${material.id}/tiles/{level}/{column}/{row}`,
+    })
+    assert.notInclude(JSON.stringify(manifest), prefix)
+    assert.notInclude(JSON.stringify(manifest), 'derivatives')
+
+    const tile = await service.getTile({
+      ...requestFor(student.id, material.id),
+      level: 13,
+      column: 16,
+      row: 1,
+    })
+    assert.equal(tile.mimeType, 'image/webp')
+    assert.equal(tile.body.toString('utf8'), 'watermarked:private-edge-tile')
+    assert.deepEqual(storage.readKeys, [tileKey])
+    assert.deepEqual(watermark.inputs.at(-1), {
+      width: 1,
+      height: 1,
+      fullName: 'Unknown user',
+      email: student.email,
+      occurredAt: now,
+    })
+    assert.deepEqual(
+      logs.inputs.map(({ action }) => action),
+      ['VIEW_MATERIAL']
+    )
+    assert.notInclude(JSON.stringify(tile), prefix)
+  })
+
+  test('rejects revoked and out-of-grid tile reads before exposing private bytes', async ({
+    assert,
+  }) => {
+    const { student, material } = await createHierarchy({ type: 'IMAGE' })
+    const prefix = `derivatives/${material.id}/hidden-run/`
+    await ImageTileManifest.create({
+      materialId: material.id,
+      storagePrefix: prefix,
+      width: 257,
+      height: 256,
+      tileSize: 256,
+      minLevel: 0,
+      maxLevel: 8,
+    })
+    const access = new FakeAccessControl({ VIEW: true, DOWNLOAD: false })
+    const logs = new FakeAccessLog()
+    const storage = new MemoryStorage()
+    const service = makeService(access, logs, storage, new FakeWatermark())
+
+    await assert.rejects(
+      () =>
+        service.getTile({
+          ...requestFor(student.id, material.id),
+          level: 8,
+          column: 2,
+          row: 0,
+        }),
+      ProtectedMaterialNotFoundError
+    )
+    assert.lengthOf(storage.readKeys, 0)
+
+    access.allowed.VIEW = false
+    await assert.rejects(
+      () =>
+        service.getTile({
+          ...requestFor(student.id, material.id),
+          level: 8,
+          column: 0,
+          row: 0,
+        }),
+      ProtectedMaterialForbiddenError
+    )
+    assert.lengthOf(storage.readKeys, 0)
+    assert.deepEqual(
+      logs.inputs.map(({ action }) => action),
+      ['FAILED_ACCESS']
+    )
+  })
+
+  test('does not return a raw derivative when watermark composition fails', async ({ assert }) => {
+    const { student, material } = await createHierarchy({ type: 'PDF' })
+    const page = await MaterialDerivative.create(derivative(material.id, 1, 0, 'private/page.webp'))
+    const storage = new MemoryStorage()
+    storage.objects.set(page.storageKey, Buffer.from('private-page-bytes'))
+    const watermark = new FakeWatermark()
+    watermark.error = new Error('watermark composition failed')
+    const service = makeService(
+      new FakeAccessControl({ VIEW: true, DOWNLOAD: false }),
+      new FakeAccessLog(),
+      storage,
+      watermark
+    )
+
+    await assert.rejects(
+      () =>
+        service.getDerivative({
+          ...requestFor(student.id, material.id),
+          derivativeId: page.id,
+        }),
+      /watermark composition failed/
+    )
     assert.deepEqual(storage.readKeys, [page.storageKey])
   })
 
@@ -229,62 +382,43 @@ test.group('ProtectedMaterialDeliveryService', (group) => {
     )
   })
 
-  test('logs late stream errors once without exposing the storage error or sending again', async ({
-    assert,
-  }) => {
-    for (const emitChunkFirst of [false, true]) {
-      const stream = new PassThrough()
-      const logged: unknown[][] = []
-      const responseCalls: string[] = []
-      let streamErrorCallback: ((error: NodeJS.ErrnoException) => [string, number?]) | undefined
-      const controller = new ProtectedMaterialsController()
-      ;(
-        controller as unknown as {
-          delivery: {
-            getDerivative(): Promise<{ stream: Readable; mimeType: string }>
-          }
-        }
-      ).delivery = {
-        async getDerivative() {
-          return { stream, mimeType: 'image/webp' }
-        },
+  test('sends composed visual bytes inline with private no-store caching', async ({ assert }) => {
+    const responseCalls: string[] = []
+    const visualBytes = Buffer.from('watermarked-webp')
+    const controller = new ProtectedMaterialsController()
+    ;(
+      controller as unknown as {
+        delivery: { getDerivative(): Promise<{ body: Buffer; mimeType: string }> }
       }
-      const context = {
-        auth: { use: () => ({ getUserOrFail: () => ({ id: 7 }) }) },
-        params: { materialId: '11', derivativeId: '13' },
-        request: { ip: () => '127.0.0.1', header: () => 'unit-test' },
-        logger: { error: (...args: unknown[]) => logged.push(args) },
-        response: {
-          header(name: string) {
-            responseCalls.push(`header:${name}`)
-            return this
-          },
-          stream(_body: Readable, callback: (error: NodeJS.ErrnoException) => [string, number?]) {
-            responseCalls.push('stream')
-            streamErrorCallback = callback
-          },
-          internalServerError() {
-            responseCalls.push('internalServerError')
-          },
-        },
-      } as unknown as HttpContext
-
-      await controller.derivative(context)
-      stream.on('error', () => undefined)
-      if (emitChunkFirst) stream.write('partial-image')
-      stream.emit('error', new Error('S3 secret=private/derivative-key'))
-      stream.emit('error', new Error('duplicate'))
-
-      assert.deepEqual(logged, [
-        [{ materialId: 11, derivativeId: 13 }, 'Protected material stream failed'],
-      ])
-      assert.notInclude(JSON.stringify(logged), 'secret')
-      assert.notInclude(responseCalls, 'internalServerError')
-      assert.deepEqual(streamErrorCallback?.(new Error('hidden')), [
-        JSON.stringify({ message: 'Unable to deliver protected material' }),
-        500,
-      ])
+    ).delivery = {
+      async getDerivative() {
+        return { body: visualBytes, mimeType: 'image/webp' }
+      },
     }
+    const context = {
+      auth: { use: () => ({ getUserOrFail: () => ({ id: 7 }) }) },
+      params: { materialId: '11', derivativeId: '13' },
+      request: { ip: () => '127.0.0.1', header: () => 'unit-test' },
+      logger: { error: () => undefined },
+      response: {
+        header(name: string, value: string) {
+          responseCalls.push(`header:${name}:${value}`)
+          return this
+        },
+        send(body: Buffer) {
+          responseCalls.push(`send:${body.toString('utf8')}`)
+        },
+      },
+    } as unknown as HttpContext
+
+    await controller.derivative(context)
+
+    assert.deepEqual(responseCalls, [
+      'header:Content-Type:image/webp',
+      'header:Content-Disposition:inline',
+      'header:Cache-Control:private, no-store',
+      'send:watermarked-webp',
+    ])
   })
 
   test('does not sign an original without DOWNLOAD and returns not-found for missing materials', async ({
@@ -315,7 +449,8 @@ test.group('ProtectedMaterialDeliveryService', (group) => {
 function makeService(
   accessControl: FakeAccessControl,
   accessLog: FakeAccessLog,
-  storage: MemoryStorage = new MemoryStorage()
+  storage: MemoryStorage = new MemoryStorage(),
+  watermark: FakeWatermark = new FakeWatermark()
 ) {
   return new ProtectedMaterialDeliveryService({
     accessControl,
@@ -323,6 +458,7 @@ function makeService(
     storage,
     now: () => now,
     apiBaseUrl: 'http://api.example.test',
+    watermark,
   })
 }
 
@@ -392,6 +528,26 @@ class MemoryStorage implements StorageService {
   async deleteObject() {}
   async exists(key: string) {
     return this.objects.has(key)
+  }
+}
+
+class FakeWatermark {
+  inputs: Array<Omit<ProtectedWatermarkInput, 'stream'>> = []
+  error?: Error
+
+  async apply(input: ProtectedWatermarkInput) {
+    const body = await streamText(input.stream)
+    this.inputs.push({
+      width: input.width,
+      height: input.height,
+      fullName: input.fullName,
+      email: input.email,
+      occurredAt: input.occurredAt,
+    })
+    if (this.error) {
+      throw this.error
+    }
+    return Buffer.from(`watermarked:${body}`)
   }
 }
 
