@@ -1,4 +1,3 @@
-import { Maximize2, Minus, Plus, RotateCcw } from 'lucide-react'
 import {
   type KeyboardEvent,
   type PointerEvent,
@@ -8,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { Button } from '@/components/ui/button'
+import { ImageViewerControls } from './image-viewer-controls'
 import type { ProtectedDerivative } from './protected-viewer-types'
 
 const MANUAL_MIN_SCALE = 0.1
@@ -30,18 +29,35 @@ interface DragOrigin {
   transformY: number
 }
 
+interface PinchOrigin {
+  distance: number
+  scale: number
+}
+
+interface PointerPosition {
+  x: number
+  y: number
+}
+
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value))
 }
 
 export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDerivative }) {
   const viewportRef = useRef<HTMLDivElement>(null)
+  const imageRef = useRef<HTMLImageElement>(null)
+  const loupeCanvasRef = useRef<HTMLCanvasElement>(null)
   const dragOriginRef = useRef<DragOrigin | null>(null)
+  const pointersRef = useRef(new Map<number, PointerPosition>())
+  const pinchOriginRef = useRef<PinchOrigin | null>(null)
   const viewModeRef = useRef<'manual' | 'fit'>('manual')
   const instructionsId = useId()
   const [transform, setTransform] = useState<Transform>({ scale: 1, x: 0, y: 0 })
   const [scaleFloor, setScaleFloor] = useState(MANUAL_MIN_SCALE)
   const [imageState, setImageState] = useState<'loading' | 'loaded' | 'error'>('loading')
+  const [loupeActive, setLoupeActive] = useState(false)
+  const [loupePosition, setLoupePosition] = useState<PointerPosition>({ x: 0, y: 0 })
+  const [fullscreenFallback, setFullscreenFallback] = useState(false)
 
   const boundPosition = useCallback(
     (scale: number, x: number, y: number, viewport = viewportRef.current) => {
@@ -140,20 +156,80 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
     return () => observer.disconnect()
   }, [boundPosition, scaleToFit])
 
+  useEffect(() => {
+    if (!loupeActive || imageState !== 'loaded') return
+    const canvas = loupeCanvasRef.current
+    const image = imageRef.current
+    const viewport = viewportRef.current
+    const context = canvas?.getContext('2d')
+    if (!canvas || !image || !viewport || !context || transform.scale <= 0) return
+
+    const sourceWidth = Math.min(derivative.width, canvas.width / (2 * transform.scale))
+    const sourceHeight = Math.min(derivative.height, canvas.height / (2 * transform.scale))
+    const imageLeft = viewport.clientWidth / 2 + transform.x - (derivative.width * transform.scale) / 2
+    const imageTop = viewport.clientHeight / 2 + transform.y - (derivative.height * transform.scale) / 2
+    const sourceX = clamp((loupePosition.x - imageLeft) / transform.scale, 0, derivative.width)
+    const sourceY = clamp((loupePosition.y - imageTop) / transform.scale, 0, derivative.height)
+    context.clearRect(0, 0, canvas.width, canvas.height)
+    context.drawImage(
+      image,
+      clamp(sourceX - sourceWidth / 2, 0, derivative.width - sourceWidth),
+      clamp(sourceY - sourceHeight / 2, 0, derivative.height - sourceHeight),
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    )
+  }, [derivative.height, derivative.width, imageState, loupeActive, loupePosition, transform])
+
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) return
+    if (event.button !== 0 && event.pointerType !== 'touch') return
     viewModeRef.current = 'manual'
-    dragOriginRef.current = {
-      pointerId: event.pointerId,
-      pointerX: event.clientX,
-      pointerY: event.clientY,
-      transformX: transform.x,
-      transformY: transform.y,
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (pointersRef.current.size === 1) {
+      dragOriginRef.current = {
+        pointerId: event.pointerId,
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+        transformX: transform.x,
+        transformY: transform.y,
+      }
+    } else if (pointersRef.current.size === 2) {
+      const [first, second] = [...pointersRef.current.values()]
+      if (!first || !second) return
+      pinchOriginRef.current = {
+        distance: Math.hypot(second.x - first.x, second.y - first.y),
+        scale: transform.scale,
+      }
+      dragOriginRef.current = null
     }
     event.currentTarget.setPointerCapture?.(event.pointerId)
   }
 
   function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (pointersRef.current.has(event.pointerId)) {
+      pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    }
+    if (loupeActive) {
+      const rect = event.currentTarget.getBoundingClientRect()
+      setLoupePosition({ x: event.clientX - rect.left, y: event.clientY - rect.top })
+    }
+    const pinch = pinchOriginRef.current
+    if (pinch && pointersRef.current.size === 2) {
+      const [first, second] = [...pointersRef.current.values()]
+      if (!first || !second || pinch.distance <= 0) return
+      const floor = minimumScale()
+      const distance = Math.hypot(second.x - first.x, second.y - first.y)
+      const scale = clamp(pinch.scale * (distance / pinch.distance), floor, MAX_SCALE)
+      setScaleFloor(floor)
+      setTransform((current) => ({
+        scale,
+        ...boundPosition(scale, current.x, current.y),
+      }))
+      return
+    }
     const origin = dragOriginRef.current
     if (!origin || origin.pointerId !== event.pointerId) return
     const position = boundPosition(
@@ -165,8 +241,9 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
   }
 
   function stopDragging(event: PointerEvent<HTMLDivElement>) {
-    if (dragOriginRef.current?.pointerId !== event.pointerId) return
-    dragOriginRef.current = null
+    pointersRef.current.delete(event.pointerId)
+    if (dragOriginRef.current?.pointerId === event.pointerId) dragOriginRef.current = null
+    if (pointersRef.current.size < 2) pinchOriginRef.current = null
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
@@ -185,45 +262,36 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
     event.preventDefault()
   }
 
+  function fullscreen() {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    if (typeof viewport.requestFullscreen !== 'function') {
+      setFullscreenFallback((current) => !current)
+      return
+    }
+    void viewport.requestFullscreen().catch(() => setFullscreenFallback(true))
+  }
+
   return (
     <section aria-label="Controles da imagem protegida" className="space-y-3">
-      <div role="toolbar" aria-label="Zoom e posição da imagem" className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label="Diminuir zoom"
-          disabled={transform.scale <= scaleFloor}
-          onClick={() => changeScale(-SCALE_STEP)}
-        >
-          <Minus aria-hidden="true" />
-        </Button>
-        <output
-          aria-live="polite"
-          aria-label="Nível de zoom"
-          className="inline-flex min-w-16 items-center justify-center text-sm tabular-nums"
-        >
-          {Math.round(transform.scale * 100)}%
-        </output>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label="Aumentar zoom"
-          disabled={transform.scale >= MAX_SCALE}
-          onClick={() => changeScale(SCALE_STEP)}
-        >
-          <Plus aria-hidden="true" />
-        </Button>
-        <Button type="button" variant="outline" onClick={fitToViewport}>
-          <Maximize2 aria-hidden="true" />
-          Ajustar à tela
-        </Button>
-        <Button type="button" variant="outline" onClick={resetView}>
-          <RotateCcw aria-hidden="true" />
-          Redefinir visualização
-        </Button>
-      </div>
+      <ImageViewerControls
+        onZoomIn={() => changeScale(SCALE_STEP)}
+        onZoomOut={() => changeScale(-SCALE_STEP)}
+        onFit={fitToViewport}
+        onReset={resetView}
+        onFullscreen={fullscreen}
+        onLoupe={() => setLoupeActive((current) => !current)}
+        loupeActive={loupeActive}
+        zoomInDisabled={transform.scale >= MAX_SCALE}
+        zoomOutDisabled={transform.scale <= scaleFloor}
+      />
+      <output
+        aria-live="polite"
+        aria-label="Nível de zoom"
+        className="inline-flex min-w-16 items-center justify-center text-sm tabular-nums"
+      >
+        {Math.round(transform.scale * 100)}%
+      </output>
 
       <p id={instructionsId} className="sr-only">
         Use as setas para mover a imagem, mais e menos para alterar o zoom, F para ajustar à tela e
@@ -237,7 +305,7 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
         aria-describedby={instructionsId}
         aria-keyshortcuts="+ - 0 F ArrowUp ArrowDown ArrowLeft ArrowRight"
         tabIndex={0}
-        className="relative h-[70vh] max-h-[48rem] min-h-80 w-full min-w-0 touch-none overflow-hidden rounded-lg border bg-muted/30 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={`relative h-[70vh] max-h-[48rem] min-h-80 w-full min-w-0 touch-none overflow-hidden rounded-lg border bg-muted/30 outline-none focus-visible:ring-2 focus-visible:ring-ring ${fullscreenFallback ? 'fixed inset-0 z-50 h-screen max-h-none rounded-none bg-background' : ''}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={stopDragging}
@@ -274,6 +342,7 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
             }}
           >
             <img
+              ref={imageRef}
               data-testid="protected-image-canvas"
               src={derivative.contentUrl}
               alt="Pré-visualização protegida"
@@ -287,6 +356,17 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
             />
           </div>
         </div>
+        {loupeActive ? (
+          <canvas
+            ref={loupeCanvasRef}
+            aria-hidden="true"
+            data-testid="protected-image-loupe"
+            width={128}
+            height={128}
+            className="pointer-events-none absolute z-10 size-32 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary/80 bg-background/10 shadow-lg backdrop-brightness-125"
+            style={{ left: loupePosition.x, top: loupePosition.y }}
+          />
+        ) : null}
       </div>
     </section>
   )

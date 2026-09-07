@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ImagePreviewViewer } from './image-preview-viewer'
 import { PdfPagesViewer } from './pdf-pages-viewer'
+import { TiledImageViewer } from './tiled-image-viewer'
 import {
   useOriginalDownloadMutation,
   useProtectedMaterialViewQuery,
@@ -67,6 +68,8 @@ function LoadedProtectedMaterialViewer({ view }: { view: ProtectedMaterialView }
         </div>
       ) : view.viewer.kind === 'PDF_PAGES' ? (
         <PdfPagesViewer derivatives={view.viewer.derivatives} />
+      ) : view.viewer.kind === 'IMAGE_TILES' ? (
+        <TiledImageViewer manifestUrl={view.viewer.manifestUrl} />
       ) : (
         <ImagePreviewViewer
           key={view.viewer.derivatives[0].id}

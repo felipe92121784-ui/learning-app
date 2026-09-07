@@ -237,4 +237,31 @@ describe('ImagePreviewViewer', () => {
     expect(document.body.textContent).not.toContain('storageKey')
     expect(image.getAttribute('src')).toBe(derivative.contentUrl)
   })
+
+  it('pinches with two pointers and uses a fullscreen layout fallback when the browser API is unavailable', () => {
+    render(<ImagePreviewViewer derivative={derivative} />)
+    const viewport = screen.getByRole('region', { name: 'Visualização da imagem protegida' })
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 500 })
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 400 })
+    Object.defineProperty(viewport, 'requestFullscreen', { configurable: true, value: undefined })
+
+    fireEvent.pointerDown(viewport, { pointerId: 1, button: 0, clientX: 0, clientY: 0 })
+    fireEvent.pointerDown(viewport, { pointerId: 2, button: 0, clientX: 100, clientY: 0 })
+    fireEvent.pointerMove(viewport, { pointerId: 2, clientX: 200, clientY: 0 })
+    expect(currentScale()).toBeCloseTo(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tela cheia' }))
+    expect(viewport.className).toContain('fixed')
+  })
+
+  it('draws its loupe locally without adding another protected image request surface', () => {
+    render(<ImagePreviewViewer derivative={derivative} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Alternar lupa' }))
+
+    const loupe = screen.getByTestId('protected-image-loupe')
+    expect(loupe.tagName).toBe('CANVAS')
+    expect(screen.getAllByRole('img', { name: 'Pré-visualização protegida' })).toHaveLength(1)
+    expect(loupe.getAttribute('src')).toBeNull()
+  })
 })

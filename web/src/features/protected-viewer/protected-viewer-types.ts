@@ -12,6 +12,7 @@ export interface ProtectedDerivative {
 export type ProtectedViewer =
   | { kind: 'PDF_PAGES'; derivatives: ProtectedDerivative[] }
   | { kind: 'IMAGE_PREVIEW'; derivatives: [ProtectedDerivative] }
+  | { kind: 'IMAGE_TILES'; manifestUrl: AbsoluteApiUrl }
 
 export interface ProtectedMaterialView {
   id: number

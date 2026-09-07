@@ -179,6 +179,27 @@ describe('ProtectedMaterialViewer', () => {
     expect(screen.queryByRole('button', { name: /baixar original/i })).toBeNull()
   })
 
+  it('selects the tiled image viewer without rendering its protected manifest URL', () => {
+    const manifestUrl = 'https://api.example.test/api/v1/materials/16/tiles/manifest'
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise<Response>(() => undefined)))
+
+    render(
+      <ProtectedMaterialViewer
+        view={{
+          id: 16,
+          title: 'Imagem grande',
+          type: 'IMAGE',
+          viewer: { kind: 'IMAGE_TILES', manifestUrl },
+          download: { allowed: false },
+        } as unknown as ProtectedMaterialView}
+      />,
+    )
+
+    expect(screen.getByRole('status').textContent).toContain('Carregando imagem protegida')
+    expect(screen.queryByRole('img', { name: 'Pré-visualização protegida' })).toBeNull()
+    expect(document.body.textContent).not.toContain(manifestUrl)
+  })
+
   it('renders no manifest or download permission from A while B loads the same material', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const a = { id: 7, fullName: 'A', email: 'a@example.test', role: 'STUDENT', status: 'ACTIVE' } as const
