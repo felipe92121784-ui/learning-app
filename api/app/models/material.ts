@@ -1,8 +1,9 @@
-import { BaseModel, belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
-import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
+import { BaseModel, belongsTo, column, hasMany, hasOne } from '@adonisjs/lucid/orm'
+import type { BelongsTo, HasMany, HasOne } from '@adonisjs/lucid/types/relations'
 import { DateTime } from 'luxon'
 import CourseModule from '#models/course_module'
 import MaterialDerivative from '#models/material_derivative'
+import ImageTileManifest from '#models/image_tile_manifest'
 import ProcessingJob from '#models/processing_job'
 import AccessRule from '#models/access_rule'
 import AccessLog from '#models/access_log'
@@ -75,6 +76,9 @@ export default class Material extends BaseModel {
     onQuery: (query) => query.orderBy('position', 'asc'),
   })
   declare derivatives: HasMany<typeof MaterialDerivative>
+
+  @hasOne(() => ImageTileManifest)
+  declare imageTileManifest: HasOne<typeof ImageTileManifest>
 
   @hasMany(() => AccessRule, {
     foreignKey: 'resourceId',

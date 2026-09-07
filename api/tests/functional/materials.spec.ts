@@ -3,6 +3,7 @@ import CourseModule from '#models/course_module'
 import AccessLog from '#models/access_log'
 import Material from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
+import ImageTileManifest from '#models/image_tile_manifest'
 import ProcessingJob from '#models/processing_job'
 import { cleanupMultipartFile } from '#middleware/multipart_cleanup_middleware'
 import MinioStorageProvider from '#services/minio_storage_provider'
@@ -470,6 +471,7 @@ test.group('Administrative material uploads', (group) => {
   const originalPutObject = MinioStorageProvider.prototype.putObject
   const originalDeleteObject = MinioStorageProvider.prototype.deleteObject
   const originalExists = MinioStorageProvider.prototype.exists
+  const originalListKeys = MinioStorageProvider.prototype.listKeys
 
   group.each.setup(async () => {
     cleanupDatabase = await testUtils.db().truncate()
@@ -515,6 +517,8 @@ test.group('Administrative material uploads', (group) => {
       storedKeys.delete(key)
     }
     MinioStorageProvider.prototype.exists = async (key) => storedKeys.has(key)
+    MinioStorageProvider.prototype.listKeys = async (prefix) =>
+      [...storedKeys].filter((key) => key.startsWith(prefix))
   })
 
   group.each.teardown(async () => {
@@ -522,6 +526,7 @@ test.group('Administrative material uploads', (group) => {
     MinioStorageProvider.prototype.putObject = originalPutObject
     MinioStorageProvider.prototype.deleteObject = originalDeleteObject
     MinioStorageProvider.prototype.exists = originalExists
+    MinioStorageProvider.prototype.listKeys = originalListKeys
     await db.rawQuery('DROP TRIGGER IF EXISTS reject_material_insert ON materials')
     await db.rawQuery('DROP FUNCTION IF EXISTS reject_material_insert()')
     await cleanupDatabase()
@@ -1271,6 +1276,47 @@ test.group('Administrative material uploads', (group) => {
     assert.isNull(await ProcessingJob.findBy('material_id', material.id))
     assert.lengthOf(await MaterialDerivative.query().where('material_id', material.id), 0)
     assert.isNull(await Material.find(material.id))
+  })
+
+  test('removes a tiled manifest and every object in its private prefix before the original', async ({
+    assert,
+    client,
+  }) => {
+    const session = await login(client, admin)
+    const created = await withCsrf(client.post(`/api/v1/modules/${module.id}/materials`), session)
+      .field('title', 'Tiled manual')
+      .file('file', pngFile, { filename: 'tiled.png', contentType: 'image/png' })
+    created.assertStatus(201)
+    const material = await Material.findOrFail(created.body().data.id)
+    const prefix = `derivatives/${material.id}/tile-run/`
+    const tileKeys = [`${prefix}tiles/0/0/0.webp`, `${prefix}tiles/1/0/0.webp`]
+    await ImageTileManifest.create({
+      materialId: material.id,
+      storagePrefix: prefix,
+      width: 4097,
+      height: 257,
+      tileSize: 256,
+      minLevel: 0,
+      maxLevel: 13,
+    })
+    storedKeys.add(tileKeys[0])
+    storedKeys.add(tileKeys[1])
+    storageOperations = []
+
+    const response = await withCsrf(
+      client.delete(`/api/v1/modules/${module.id}/materials/${material.id}`),
+      session
+    )
+
+    response.assertStatus(204)
+    assert.deepEqual(storageOperations, [
+      `delete:${tileKeys[0]}`,
+      `delete:${tileKeys[1]}`,
+      `delete:${material.storageKey}`,
+    ])
+    assert.isNull(await ImageTileManifest.findBy('material_id', material.id))
+    assert.isFalse(storedKeys.has(tileKeys[0]))
+    assert.isFalse(storedKeys.has(tileKeys[1]))
   })
 
   test('refuses deletion with access history before removing private objects', async ({

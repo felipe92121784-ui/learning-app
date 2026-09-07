@@ -5,9 +5,11 @@ import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import Material from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
+import ImageTileManifest from '#models/image_tile_manifest'
 import ProcessingJob from '#models/processing_job'
 import ImageDerivativeRenderer, {
   type ImageRenderResult,
+  type RenderedStorageArtifact,
 } from '#services/image_derivative_renderer'
 import PdfRenderer, { ProcessingFailure, type RenderedDerivative } from '#services/pdf_renderer'
 import { withPrivateWorkDirectory } from '#services/private_work_directory'
@@ -35,6 +37,8 @@ interface MaterialProcessingServiceOptions {
   pdfRenderer?: PdfRendererLike
   imageRenderer?: ImageRendererLike
 }
+
+type RenderedOutput = { mode: 'DERIVATIVES'; artifacts: RenderedDerivative[] } | ImageRenderResult
 
 export default class MaterialProcessingService {
   private storage: StorageService
@@ -69,20 +73,20 @@ export default class MaterialProcessingService {
         const originalPath = join(directory, 'original')
         await this.downloadOriginal(job.material.storageKey, originalPath)
 
-        const outputs = await this.renderDerivatives(job, originalPath, directory)
+        const output = await this.renderOutput(job, originalPath, directory)
         await this.persistOutputPrefix(job, outputPrefix, claimToken)
 
-        for (const output of outputs) {
-          const key = `${outputPrefix}${output.filename}`
+        for (const artifact of output.artifacts) {
+          const key = `${outputPrefix}${storageRelativeKey(output, artifact)}`
           uploadedKeys.push(key)
           await this.storage.putObject({
             key,
-            body: createReadStream(output.path),
-            contentType: 'image/webp',
+            body: createReadStream(artifact.path),
+            contentType: artifact.mimeType,
           })
         }
 
-        await this.persistSuccessfulRun(job, outputs, uploadedKeys, now, claimToken)
+        await this.persistSuccessfulRun(job, output, outputPrefix, uploadedKeys, now, claimToken)
       })
     } catch (error) {
       if (job.outputPrefix) {
@@ -141,27 +145,23 @@ export default class MaterialProcessingService {
     }
   }
 
-  private async renderDerivatives(
+  private async renderOutput(
     job: ProcessingJob,
     source: string,
     outputDirectory: string
-  ): Promise<RenderedDerivative[]> {
+  ): Promise<RenderedOutput> {
     if (job.kind === 'PDF_RENDER') {
       const rendered = await this.pdfRenderer.render({ source, outputDirectory })
-      return rendered.pages
+      return { mode: 'DERIVATIVES', artifacts: rendered.pages }
     }
 
-    const rendered = await this.imageRenderer.render({ source, outputDirectory })
-    if (rendered.mode === 'TILES') {
-      throw new ProcessingFailure('PROCESSING_FAILED', false)
-    }
-
-    return rendered.artifacts
+    return this.imageRenderer.render({ source, outputDirectory })
   }
 
   private async persistSuccessfulRun(
     job: ProcessingJob,
-    outputs: RenderedDerivative[],
+    output: RenderedOutput,
+    outputPrefix: string,
     uploadedKeys: string[],
     now: DateTime,
     claimToken: string
@@ -188,6 +188,10 @@ export default class MaterialProcessingService {
       const previousDerivatives = await MaterialDerivative.query({ client: trx })
         .where('material_id', material.id)
         .orderBy('position', 'asc')
+      const previousManifest = await ImageTileManifest.query({ client: trx })
+        .where('material_id', material.id)
+        .forUpdate()
+        .first()
       const pendingCleanupKeys = [
         ...new Set([
           ...(currentJob.pendingCleanupKeys ?? []),
@@ -204,7 +208,7 @@ export default class MaterialProcessingService {
           locked_at: null,
           lease_expires_at: null,
           last_error_code: null,
-          output_prefix: null,
+          output_prefix: previousManifest?.storagePrefix ?? null,
           pending_cleanup_keys:
             pendingCleanupKeys.length > 0 ? JSON.stringify(pendingCleanupKeys) : null,
           updated_at: now.toSQL(),
@@ -214,20 +218,32 @@ export default class MaterialProcessingService {
       }
 
       await MaterialDerivative.query({ client: trx }).where('material_id', material.id).delete()
+      await ImageTileManifest.query({ client: trx }).where('material_id', material.id).delete()
 
-      await MaterialDerivative.createMany(
-        outputs.map((output, index) => ({
-          materialId: material.id,
-          kind: output.pageNumber === null ? 'IMAGE_PREVIEW' : 'PDF_PAGE',
-          storageKey: uploadedKeys[index],
-          mimeType: output.mimeType,
-          pageNumber: output.pageNumber,
-          width: output.width,
-          height: output.height,
-          position: output.position,
-        })),
-        { client: trx }
-      )
+      if (output.mode === 'TILES') {
+        await ImageTileManifest.create(
+          {
+            materialId: material.id,
+            storagePrefix: outputPrefix,
+            ...output.manifest,
+          },
+          { client: trx }
+        )
+      } else {
+        await MaterialDerivative.createMany(
+          output.artifacts.map((artifact, index) => ({
+            materialId: material.id,
+            kind: artifact.pageNumber === null ? 'IMAGE_PREVIEW' : 'PDF_PAGE',
+            storageKey: uploadedKeys[index],
+            mimeType: artifact.mimeType,
+            pageNumber: artifact.pageNumber,
+            width: artifact.width,
+            height: artifact.height,
+            position: artifact.position,
+          })),
+          { client: trx }
+        )
+      }
 
       material.merge({ processingStatus: 'READY', processingErrorCode: null })
       material.useTransaction(trx)
@@ -238,7 +254,7 @@ export default class MaterialProcessingService {
         lockedAt: null,
         leaseExpiresAt: null,
         lastErrorCode: null,
-        outputPrefix: null,
+        outputPrefix: previousManifest?.storagePrefix ?? null,
         pendingCleanupKeys: pendingCleanupKeys.length > 0 ? pendingCleanupKeys : null,
         updatedAt: now,
       })
@@ -284,6 +300,16 @@ export default class MaterialProcessingService {
       throw new Error('Private derivative prefix cleanup left objects behind')
     }
   }
+}
+
+function storageRelativeKey(
+  output: RenderedOutput,
+  artifact: RenderedDerivative | RenderedStorageArtifact
+) {
+  if (output.mode === 'TILES') {
+    return (artifact as RenderedStorageArtifact).relativeKey
+  }
+  return (artifact as RenderedDerivative).filename
 }
 
 function isMissingObjectError(error: unknown) {

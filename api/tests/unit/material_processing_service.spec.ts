@@ -2,6 +2,7 @@ import Course from '#models/course'
 import CourseModule from '#models/course_module'
 import Material from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
+import ImageTileManifest from '#models/image_tile_manifest'
 import ProcessingJob from '#models/processing_job'
 import MaterialProcessingService, { ProcessingFailure } from '#services/material_processing_service'
 import type { ImageRenderResult } from '#services/image_derivative_renderer'
@@ -46,11 +47,40 @@ test.group('MaterialProcessingService', (group) => {
     assert.lengthOf(storage.putKeys, 0)
   })
 
-  test('does not upload tile artifacts until the atomic tile publisher is available', async ({
+  test('publishes a tile manifest only after all tile uploads succeed', async ({ assert }) => {
+    const { job, material } = await createRunningJob('IMAGE')
+    const storage = new MemoryStorage({ 'originals/material': Buffer.from('original') })
+    const service = processingService(storage, {
+      pdfRenderer: pdfRenderer(),
+      imageRenderer: tileImageRenderer(),
+    })
+
+    await service.process(job.id, DateTime.utc(), job.claimToken!)
+
+    const manifest = await ImageTileManifest.findByOrFail('material_id', material.id)
+    await job.refresh()
+    await material.refresh()
+    assert.deepEqual(storage.putKeys, [
+      `${manifest.storagePrefix}tiles/0/0/0.webp`,
+      `${manifest.storagePrefix}tiles/1/0/0.webp`,
+    ])
+    assert.equal(manifest.width, 4097)
+    assert.equal(manifest.height, 257)
+    assert.equal(manifest.tileSize, 256)
+    assert.equal(manifest.minLevel, 0)
+    assert.equal(manifest.maxLevel, 13)
+    assert.lengthOf(await MaterialDerivative.query(), 0)
+    assert.equal(job.status, 'SUCCEEDED')
+    assert.isNull(job.outputPrefix)
+    assert.equal(material.processingStatus, 'READY')
+  })
+
+  test('leaves a processing material without a manifest when a tile upload fails', async ({
     assert,
   }) => {
-    const { job } = await createRunningJob('IMAGE')
+    const { job, material } = await createRunningJob('IMAGE')
     const storage = new MemoryStorage({ 'originals/material': Buffer.from('original') })
+    storage.failPutAt = 2
     const service = processingService(storage, {
       pdfRenderer: pdfRenderer(),
       imageRenderer: tileImageRenderer(),
@@ -60,9 +90,12 @@ test.group('MaterialProcessingService', (group) => {
 
     assert.instanceOf(error, ProcessingFailure)
     assert.equal((error as ProcessingFailure).code, 'PROCESSING_FAILED')
-    assert.isFalse((error as ProcessingFailure).retryable)
-    assert.lengthOf(storage.putKeys, 0)
-    assert.lengthOf(await MaterialDerivative.query(), 0)
+    assert.isTrue((error as ProcessingFailure).retryable)
+    assert.isNull(await ImageTileManifest.findBy('material_id', material.id))
+    await material.refresh()
+    assert.equal(material.processingStatus, 'PROCESSING')
+    assert.lengthOf(storage.putKeys, 2)
+    assert.deepEqual(storage.deletedKeys, storage.putKeys)
   })
 
   test('deletes uploaded private keys when a later derivative upload fails', async ({ assert }) => {
@@ -192,6 +225,51 @@ test.group('MaterialProcessingService', (group) => {
     await job.refresh()
     assert.deepEqual(job.pendingCleanupKeys, [oldKey])
     assert.notInclude(storage.deletedKeys, oldKey)
+  })
+
+  test('reprocess schedules the former tile prefix for cleanup without queuing every tile key', async ({
+    assert,
+  }) => {
+    const { job, material } = await createRunningJob('IMAGE')
+    const oldPrefix = `derivatives/${material.id}/old-tiles/`
+    const oldTileKeys = [`${oldPrefix}tiles/0/0/0.webp`, `${oldPrefix}tiles/1/0/0.webp`]
+    await ImageTileManifest.create({
+      materialId: material.id,
+      storagePrefix: oldPrefix,
+      width: 4097,
+      height: 257,
+      tileSize: 256,
+      minLevel: 0,
+      maxLevel: 13,
+    })
+    const storage = new MemoryStorage({
+      'originals/material': Buffer.from('original'),
+      [oldTileKeys[0]]: Buffer.from('old tile one'),
+      [oldTileKeys[1]]: Buffer.from('old tile two'),
+    })
+    const service = processingService(storage, {
+      pdfRenderer: pdfRenderer(),
+      imageRenderer: imageRenderer(),
+    })
+
+    const now = DateTime.utc()
+    await service.process(job.id, now, job.claimToken!)
+
+    assert.isNull(await ImageTileManifest.findBy('material_id', material.id))
+    await job.refresh()
+    assert.equal(job.outputPrefix, oldPrefix)
+    assert.isNull(job.pendingCleanupKeys)
+
+    const worker = new ProcessingWorker({
+      jobs: new ProcessingJobService(),
+      processor: service,
+      storage,
+    })
+    assert.isTrue(await worker.runOnce(now.plus({ seconds: 1 })))
+    await job.refresh()
+    assert.isNull(job.outputPrefix)
+    assert.isFalse(await storage.exists(oldTileKeys[0]))
+    assert.isFalse(await storage.exists(oldTileKeys[1]))
   })
 
   test('tolerates a missing prior derivative object while replacing its metadata', async ({
@@ -540,14 +618,38 @@ function imageRenderer(options: { width?: number } = {}) {
 }
 
 function tileImageRenderer(): {
-  render(): Promise<Extract<ImageRenderResult, { mode: 'TILES' }>>
+  render(input: {
+    source: string
+    outputDirectory: string
+  }): Promise<Extract<ImageRenderResult, { mode: 'TILES' }>>
 } {
   return {
-    async render() {
+    async render({ outputDirectory }) {
+      const firstPath = `${outputDirectory}/tile-0.webp`
+      const secondPath = `${outputDirectory}/tile-1.webp`
+      await Promise.all([
+        writeFile(firstPath, 'tile zero', { mode: 0o600 }),
+        writeFile(secondPath, 'tile one', { mode: 0o600 }),
+      ])
       return {
         mode: 'TILES' as const,
         manifest: { width: 4097, height: 257, tileSize: 256, minLevel: 0, maxLevel: 13 },
-        artifacts: [],
+        artifacts: [
+          {
+            relativeKey: 'tiles/0/0/0.webp',
+            path: firstPath,
+            mimeType: 'image/webp',
+            width: 1,
+            height: 1,
+          },
+          {
+            relativeKey: 'tiles/1/0/0.webp',
+            path: secondPath,
+            mimeType: 'image/webp',
+            width: 1,
+            height: 1,
+          },
+        ],
       }
     },
   }

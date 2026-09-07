@@ -2,6 +2,7 @@ import CourseModule from '#models/course_module'
 import AccessLog from '#models/access_log'
 import Material, { type MaterialType } from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
+import ImageTileManifest from '#models/image_tile_manifest'
 import ProcessingJobService from '#services/processing_job_service'
 import UploadSetting from '#models/upload_setting'
 import MinioStorageProvider from '#services/minio_storage_provider'
@@ -147,6 +148,10 @@ export default class MaterialsController {
         const derivatives = await MaterialDerivative.query({ client: trx })
           .where('material_id', lockedMaterial.id)
           .orderBy('position', 'asc')
+        const tileManifest = await ImageTileManifest.query({ client: trx })
+          .where('material_id', lockedMaterial.id)
+          .forUpdate()
+          .first()
         const [countRow] = await Material.query({ client: trx })
           .where('module_id', moduleId)
           .count('* as total')
@@ -155,9 +160,13 @@ export default class MaterialsController {
         for (const derivative of derivatives) {
           await deletePrivateObject(this.storage, derivative.storageKey)
         }
+        if (tileManifest) {
+          await deletePrivatePrefix(this.storage, tileManifest.storagePrefix)
+        }
         await deletePrivateObject(this.storage, lockedMaterial.storageKey)
         await lockedMaterial.related('jobs').query().delete()
         await lockedMaterial.related('derivatives').query().delete()
+        await lockedMaterial.related('imageTileManifest').query().delete()
         await lockedMaterial.useTransaction(trx).delete()
         if (temporaryOffset > 1) {
           await trx.rawQuery(
@@ -236,5 +245,16 @@ async function deletePrivateObject(storage: MinioStorageProvider, key: string) {
     if (!isMissingObjectError(error)) {
       throw error
     }
+  }
+}
+
+async function deletePrivatePrefix(storage: MinioStorageProvider, prefix: string) {
+  const keys = await storage.listKeys(prefix)
+  for (const key of keys) {
+    await deletePrivateObject(storage, key)
+  }
+  const remainingKeys = await storage.listKeys(prefix)
+  if (remainingKeys.length > 0) {
+    throw new Error('Private tile prefix cleanup left objects behind')
   }
 }
