@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ProtectedDerivative } from './protected-viewer-types'
 import { ImagePreviewViewer } from './image-preview-viewer'
@@ -263,5 +263,22 @@ describe('ImagePreviewViewer', () => {
     expect(loupe.tagName).toBe('CANVAS')
     expect(screen.getAllByRole('img', { name: 'Pré-visualização protegida' })).toHaveLength(1)
     expect(loupe.getAttribute('src')).toBeNull()
+  })
+
+  it('keeps the preview usable when copying protected pixels to the loupe is rejected', async () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(() => { throw new DOMException('Cross-origin pixels', 'SecurityError') }),
+    } as unknown as CanvasRenderingContext2D
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context)
+    render(<ImagePreviewViewer derivative={derivative} />)
+    const image = screen.getByRole('img', { name: 'Pré-visualização protegida' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Alternar lupa' }))
+    fireEvent.load(image)
+
+    await waitFor(() => expect(screen.getByTestId('protected-image-loupe-unavailable').textContent).toBe('A lupa não está disponível para esta imagem.'))
+    expect(screen.getByRole('region', { name: 'Visualização da imagem protegida' })).toBeTruthy()
+    expect(screen.getAllByRole('img', { name: 'Pré-visualização protegida' })).toHaveLength(1)
   })
 })

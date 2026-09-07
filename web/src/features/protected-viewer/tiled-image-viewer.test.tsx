@@ -118,4 +118,25 @@ describe('TiledImageViewer', () => {
     expect(loupe.getAttribute('src')).toBeNull()
     expect(document.body.textContent).not.toContain(manifest.tileUrlTemplate)
   })
+
+  it('keeps the tiled viewport usable when protected canvas pixels reject a local copy', async () => {
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(() => { throw new DOMException('Cross-origin pixels', 'SecurityError') }),
+    } as unknown as CanvasRenderingContext2D
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: manifest })))
+    render(<TiledImageViewer manifestUrl={manifestUrl} />)
+    await waitFor(() => expect(openSeadragon).toHaveBeenCalledOnce())
+    const viewport = screen.getByRole('region', { name: 'Visualização da imagem protegida' })
+    const protectedCanvas = document.createElement('canvas')
+    vi.spyOn(protectedCanvas, 'getBoundingClientRect').mockReturnValue({ width: 100, height: 100 } as DOMRect)
+    viewport.append(protectedCanvas)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Alternar lupa' }))
+
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('A lupa não está disponível para esta imagem.'))
+    expect(screen.getByRole('region', { name: 'Visualização da imagem protegida' })).toBeTruthy()
+    expect(viewer.destroy).not.toHaveBeenCalled()
+  })
 })

@@ -56,6 +56,7 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
   const [scaleFloor, setScaleFloor] = useState(MANUAL_MIN_SCALE)
   const [imageState, setImageState] = useState<'loading' | 'loaded' | 'error'>('loading')
   const [loupeActive, setLoupeActive] = useState(false)
+  const [loupeUnavailable, setLoupeUnavailable] = useState(false)
   const [loupePosition, setLoupePosition] = useState<PointerPosition>({ x: 0, y: 0 })
   const [fullscreenFallback, setFullscreenFallback] = useState(false)
 
@@ -157,7 +158,8 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
   }, [boundPosition, scaleToFit])
 
   useEffect(() => {
-    if (!loupeActive || imageState !== 'loaded') return
+    if (!loupeActive || loupeUnavailable || imageState !== 'loaded') return
+    let mounted = true
     const canvas = loupeCanvasRef.current
     const image = imageRef.current
     const viewport = viewportRef.current
@@ -170,19 +172,27 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
     const imageTop = viewport.clientHeight / 2 + transform.y - (derivative.height * transform.scale) / 2
     const sourceX = clamp((loupePosition.x - imageLeft) / transform.scale, 0, derivative.width)
     const sourceY = clamp((loupePosition.y - imageTop) / transform.scale, 0, derivative.height)
-    context.clearRect(0, 0, canvas.width, canvas.height)
-    context.drawImage(
-      image,
-      clamp(sourceX - sourceWidth / 2, 0, derivative.width - sourceWidth),
-      clamp(sourceY - sourceHeight / 2, 0, derivative.height - sourceHeight),
-      sourceWidth,
-      sourceHeight,
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    )
-  }, [derivative.height, derivative.width, imageState, loupeActive, loupePosition, transform])
+    try {
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(
+        image,
+        clamp(sourceX - sourceWidth / 2, 0, derivative.width - sourceWidth),
+        clamp(sourceY - sourceHeight / 2, 0, derivative.height - sourceHeight),
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      )
+    } catch {
+      // Cross-origin image pixels can be displayable but not copyable into another canvas.
+      queueMicrotask(() => {
+        if (mounted) setLoupeUnavailable(true)
+      })
+    }
+    return () => { mounted = false }
+  }, [derivative.height, derivative.width, imageState, loupeActive, loupePosition, loupeUnavailable, transform])
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0 && event.pointerType !== 'touch') return
@@ -272,6 +282,11 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
     void viewport.requestFullscreen().catch(() => setFullscreenFallback(true))
   }
 
+  function toggleLoupe() {
+    setLoupeUnavailable(false)
+    setLoupeActive((current) => !current)
+  }
+
   return (
     <section aria-label="Controles da imagem protegida" className="space-y-3">
       <ImageViewerControls
@@ -280,7 +295,7 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
         onFit={fitToViewport}
         onReset={resetView}
         onFullscreen={fullscreen}
-        onLoupe={() => setLoupeActive((current) => !current)}
+        onLoupe={toggleLoupe}
         loupeActive={loupeActive}
         zoomInDisabled={transform.scale >= MAX_SCALE}
         zoomOutDisabled={transform.scale <= scaleFloor}
@@ -356,7 +371,17 @@ export function ImagePreviewViewer({ derivative }: { derivative: ProtectedDeriva
             />
           </div>
         </div>
-        {loupeActive ? (
+        {loupeActive && loupeUnavailable ? (
+          <div
+            role="status"
+            aria-live="polite"
+            data-testid="protected-image-loupe-unavailable"
+            className="pointer-events-none absolute z-10 grid size-32 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-muted-foreground/50 bg-background/90 p-3 text-center text-xs text-muted-foreground shadow-lg"
+            style={{ left: loupePosition.x, top: loupePosition.y }}
+          >
+            A lupa não está disponível para esta imagem.
+          </div>
+        ) : loupeActive ? (
           <canvas
             ref={loupeCanvasRef}
             aria-hidden="true"

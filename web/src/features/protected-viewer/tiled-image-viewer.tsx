@@ -22,6 +22,7 @@ interface ViewerStateForManifest {
 interface LoupeStateForManifest {
   manifestUrl: AbsoluteApiUrl
   active: boolean
+  unavailable: boolean
 }
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -100,11 +101,14 @@ export function TiledImageViewer({ manifestUrl }: { manifestUrl: AbsoluteApiUrl 
   const [loupeStateForManifest, setLoupeStateForManifest] = useState<LoupeStateForManifest>({
     manifestUrl,
     active: false,
+    unavailable: false,
   })
   const [loupePosition, setLoupePosition] = useState({ x: 0, y: 0 })
   const state = stateForManifest.manifestUrl === manifestUrl ? stateForManifest.value : 'loading'
   const loupeActive =
     loupeStateForManifest.manifestUrl === manifestUrl && loupeStateForManifest.active
+  const loupeUnavailable =
+    loupeStateForManifest.manifestUrl === manifestUrl && loupeStateForManifest.unavailable
 
   const destroyViewer = useCallback(() => {
     const viewer = viewerRef.current
@@ -170,7 +174,8 @@ export function TiledImageViewer({ manifestUrl }: { manifestUrl: AbsoluteApiUrl 
   }, [destroyViewer, manifestUrl])
 
   useEffect(() => {
-    if (!loupeActive) return
+    if (!loupeActive || loupeUnavailable) return
+    let mounted = true
     const viewport = viewportRef.current
     const canvas = loupeCanvasRef.current
     const source = [...(viewport?.querySelectorAll('canvas') ?? [])].find((element) => element !== canvas)
@@ -183,19 +188,27 @@ export function TiledImageViewer({ manifestUrl }: { manifestUrl: AbsoluteApiUrl 
     const sourceY = clamp((loupePosition.y / rect.height) * source.height, 0, source.height)
     const sourceWidth = Math.min(source.width, canvas.width / 2)
     const sourceHeight = Math.min(source.height, canvas.height / 2)
-    context.clearRect(0, 0, canvas.width, canvas.height)
-    context.drawImage(
-      source,
-      clamp(sourceX - sourceWidth / 2, 0, source.width - sourceWidth),
-      clamp(sourceY - sourceHeight / 2, 0, source.height - sourceHeight),
-      sourceWidth,
-      sourceHeight,
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    )
-  }, [loupeActive, loupePosition])
+    try {
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(
+        source,
+        clamp(sourceX - sourceWidth / 2, 0, source.width - sourceWidth),
+        clamp(sourceY - sourceHeight / 2, 0, source.height - sourceHeight),
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      )
+    } catch {
+      // A tainted OpenSeadragon canvas must not affect the protected viewer lifecycle.
+      queueMicrotask(() => {
+        if (mounted) setLoupeStateForManifest({ manifestUrl, active: true, unavailable: true })
+      })
+    }
+    return () => { mounted = false }
+  }, [loupeActive, loupePosition, loupeUnavailable, manifestUrl])
 
   function zoom(factor: number) {
     const viewer = viewerRef.current
@@ -224,7 +237,7 @@ export function TiledImageViewer({ manifestUrl }: { manifestUrl: AbsoluteApiUrl 
       x: (viewport?.clientWidth ?? 0) / 2,
       y: (viewport?.clientHeight ?? 0) / 2,
     })
-    setLoupeStateForManifest({ manifestUrl, active: !loupeActive })
+    setLoupeStateForManifest({ manifestUrl, active: !loupeActive, unavailable: false })
   }
 
   function moveLoupe(event: PointerEvent<HTMLDivElement>) {
@@ -260,7 +273,17 @@ export function TiledImageViewer({ manifestUrl }: { manifestUrl: AbsoluteApiUrl 
               Carregando imagem protegida…
             </div>
           ) : null}
-          {loupeActive ? (
+          {loupeActive && loupeUnavailable ? (
+            <div
+              role="status"
+              aria-live="polite"
+              data-testid="protected-image-loupe-unavailable"
+              className="pointer-events-none absolute z-10 grid size-32 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-muted-foreground/50 bg-background/90 p-3 text-center text-xs text-muted-foreground shadow-lg"
+              style={{ left: loupePosition.x, top: loupePosition.y }}
+            >
+              A lupa não está disponível para esta imagem.
+            </div>
+          ) : loupeActive ? (
             <canvas
               ref={loupeCanvasRef}
               aria-hidden="true"
