@@ -1,0 +1,11 @@
+:80 {
+	handle /api/* {
+		header Cache-Control "no-store"
+		reverse_proxy api:3333
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

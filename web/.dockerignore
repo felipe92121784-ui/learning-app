@@ -1,0 +1,22 @@
+# Source control and local configuration
+.git
+.gitignore
+.env*
+**/.env*
+.superpowers
+
+# Dependencies and generated output
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+coverage
+**/coverage
+
+# Local transient upload data
+uploads
+**/uploads
+tmp
+**/tmp
