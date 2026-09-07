@@ -54,6 +54,97 @@ graph without rewriting it. Vite is pinned to port 5173 and exits instead of
 silently choosing another port when 5173 is occupied; this keeps the dev-server
 origin aligned with the API CORS configuration.
 
+## Zima production deployment
+
+The production stack publishes only the Web/Caddy port. API, worker, PostgreSQL,
+and MinIO stay on Compose's private network. Keep the real environment file and
+all secret values on the Zima host; never commit them.
+
+### First start
+
+On the Zima host, from the repository root:
+
+```sh
+cp .env.production.example .env.production
+```
+
+Edit `.env.production` and set `APP_PORT`, `APP_PUBLIC_URL`, `APP_KEY`,
+`DB_PASSWORD`, `MINIO_ROOT_PASSWORD`, and the initial `ADMIN_NAME`,
+`ADMIN_EMAIL`, and `ADMIN_PASSWORD` values. Use instance-specific values for
+every other blank or secret setting. Then build and start the stack:
+
+```sh
+docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
+```
+
+Run database setup explicitly after the containers are healthy. The administrator
+seed is idempotent, so it is safe to run again during recovery:
+
+```sh
+docker compose --env-file .env.production -f docker-compose.production.yml exec -T api node ace migration:run
+docker compose --env-file .env.production -f docker-compose.production.yml exec -T api node ace db:seed --files database/seeders/admin_seeder
+```
+
+The existing tunnel is outside this project: point it at the Zima host and the
+chosen `APP_PORT` (for example, `http://127.0.0.1:8080`). Do not add tunnel
+credentials or a tunnel service to this Compose stack.
+
+### Updates and operations
+
+Pull the new revision and rebuild without recreating the persistent volumes:
+
+```sh
+docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
+docker compose --env-file .env.production -f docker-compose.production.yml exec -T api node ace migration:run
+```
+
+Inspect application or worker logs, and stop the stack while retaining data:
+
+```sh
+docker compose --env-file .env.production -f docker-compose.production.yml logs -f web api worker
+docker compose --env-file .env.production -f docker-compose.production.yml down
+```
+
+Before a significant update, back up both named data volumes. Compose labels
+identify the actual project-prefixed volume names, so these commands work even
+when the checkout directory changes:
+
+```sh
+mkdir -p backups
+POSTGRES_VOLUME="$(docker volume ls -q --filter label=com.docker.compose.volume=postgres_data | head -n 1)"
+MINIO_VOLUME="$(docker volume ls -q --filter label=com.docker.compose.volume=minio_data | head -n 1)"
+docker run --rm -v "$POSTGRES_VOLUME:/source:ro" -v "$PWD/backups:/backup" alpine tar czf /backup/postgres_data.tgz -C /source .
+docker run --rm -v "$MINIO_VOLUME:/source:ro" -v "$PWD/backups:/backup" alpine tar czf /backup/minio_data.tgz -C /source .
+```
+
+The continuously running `worker` consumes queued processing jobs. To reprocess
+pending jobs on demand, run the same command explicitly in that service:
+
+```sh
+docker compose --env-file .env.production -f docker-compose.production.yml exec -T worker node ace process:material-jobs
+```
+
+### Production smoke test
+
+After first start, verify the following with the public URL and an administrator
+account:
+
+1. `curl --fail "https://your-public-url.example/"` returns the Web application
+   (replace the placeholder with `APP_PUBLIC_URL`, or open that URL in a
+   browser).
+2. Log in, confirm the authenticated profile loads, and upload a small PDF or
+   image from the administration UI.
+3. Confirm the material changes from processing to `READY`; if it remains
+   queued, inspect `docker compose ... logs worker` and run the reprocessing
+   command above.
+4. Open the material in the protected viewer. Confirm an account without the
+   material's view permission is denied, while an authorized account can request
+   the original download through the UI.
+5. In the browser Network panel, confirm protected viewer, derivative, tile,
+   and download responses are `private, no-store` and contain no MinIO hostname,
+   bucket URL, or storage key. MinIO must remain unreachable from the public
+   entry point.
+
 ## Protected image viewing
 
 The image pipeline is configured by these API environment variables (the
