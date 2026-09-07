@@ -12,8 +12,9 @@ import {
   PutBucketPolicyCommand,
   PutObjectCommand,
   PutPublicAccessBlockCommand,
+  S3Client,
 } from '@aws-sdk/client-s3'
-import type { PutBucketAclCommand, S3Client } from '@aws-sdk/client-s3'
+import type { PutBucketAclCommand } from '@aws-sdk/client-s3'
 import MinioStorageProvider from '#services/minio_storage_provider'
 
 class S3Error extends Error {
@@ -180,6 +181,102 @@ test('reads a private object body without creating a URL', async ({ assert }) =>
 
   assert.equal(await readBody(body), 'private bytes')
   assert.notProperty(storage, 'publicUrl')
+})
+
+test('creates a five-minute attachment URL without exposing it in logs', async ({ assert }) => {
+  let capturedCommand: GetObjectCommand | undefined
+  let capturedExpiresIn: number | undefined
+  let capturedSigningDate: Date | undefined
+  const signingDate = new Date('2026-09-06T12:00:00.789Z')
+  const client = testClient(async () => ({}))
+  const storage = new MinioStorageProvider({
+    bucket: 'materials',
+    client,
+    now: () => signingDate,
+    createSignedUrl: async (command, expiresIn, signedAt) => {
+      capturedCommand = command
+      capturedExpiresIn = expiresIn
+      capturedSigningDate = signedAt
+      return 'https://storage.test/materials/originals/private-id?signature=private'
+    },
+  })
+
+  const result = await storage.createTemporaryDownloadUrl({
+    key: 'originals/private-id',
+    filename: 'manual técnico.pdf',
+    expiresInSeconds: 300,
+  })
+
+  assert.match(result.url, /^https?:\/\//)
+  assert.equal(result.expiresAt, '2026-09-06T12:05:00.000Z')
+  assert.deepInclude(capturedCommand?.input, {
+    Bucket: 'materials',
+    Key: 'originals/private-id',
+    ResponseContentDisposition: 'attachment; filename="manual-tecnico.pdf"',
+  })
+  assert.equal(capturedExpiresIn, 300)
+  assert.equal(capturedSigningDate?.toISOString(), '2026-09-06T12:00:00.000Z')
+})
+
+test('returns the exact expiry encoded into the SigV4 URL', async ({ assert }) => {
+  const storage = new MinioStorageProvider({
+    bucket: 'materials',
+    now: () => new Date('2026-09-06T12:00:00.789Z'),
+    client: new S3Client({
+      endpoint: 'http://storage.test',
+      region: 'us-east-1',
+      credentials: { accessKeyId: 'test-access', secretAccessKey: 'test-secret' },
+      forcePathStyle: true,
+    }),
+  })
+
+  const result = await storage.createTemporaryDownloadUrl({
+    key: 'originals/private-id',
+    filename: 'manual.pdf',
+    expiresInSeconds: 300,
+  })
+  const signedUrl = new URL(result.url)
+
+  assert.equal(signedUrl.searchParams.get('X-Amz-Date'), '20260906T120000Z')
+  assert.equal(signedUrl.searchParams.get('X-Amz-Expires'), '300')
+  assert.equal(result.expiresAt, '2026-09-06T12:05:00.000Z')
+})
+
+test('bounds attachment filenames while preserving a safe extension and removing header controls', async ({
+  assert,
+}) => {
+  let capturedCommand: GetObjectCommand | undefined
+  const storage = new MinioStorageProvider({
+    bucket: 'materials',
+    client: testClient(async () => ({})),
+    createSignedUrl: async (command) => {
+      capturedCommand = command
+      return 'https://storage.test/materials/originals/private-id?signature=private'
+    },
+  })
+
+  await storage.createTemporaryDownloadUrl({
+    key: 'originals/private-id',
+    filename: `${'a'.repeat(4096)}.pdf`,
+    expiresInSeconds: 300,
+  })
+
+  const longDisposition = capturedCommand!.input.ResponseContentDisposition!
+  const longFilename = longDisposition.slice('attachment; filename="'.length, -1)
+  assert.lengthOf(longFilename, 180)
+  assert.match(longFilename, /\.pdf$/)
+
+  await storage.createTemporaryDownloadUrl({
+    key: 'originals/private-id',
+    filename: 'report"\r\nX-Injected: yes.pdf',
+    expiresInSeconds: 300,
+  })
+
+  const unsafeDisposition = capturedCommand!.input.ResponseContentDisposition!
+  assert.notInclude(unsafeDisposition, '\r')
+  assert.notInclude(unsafeDisposition, '\n')
+  assert.notInclude(unsafeDisposition, '"\r')
+  assert.match(unsafeDisposition, /^attachment; filename="[A-Za-z0-9._ -]+"$/)
 })
 
 test('lists every private object key across paginated results', async ({ assert }) => {

@@ -11,19 +11,35 @@ import {
   PutBucketAclCommand,
   S3Client,
 } from '@aws-sdk/client-s3'
-import type { StorageService, PutObjectInput } from '#services/storage_service'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import type {
+  CreateTemporaryDownloadUrlInput,
+  PutObjectInput,
+  StorageService,
+  TemporaryDownloadUrl,
+} from '#services/storage_service'
 import type { Readable } from 'node:stream'
 
 type S3ClientLike = S3Client
+type CreateSignedUrl = (
+  command: GetObjectCommand,
+  expiresIn: number,
+  signingDate: Date
+) => Promise<string>
+const MAX_ATTACHMENT_FILENAME_LENGTH = 180
 
 interface MinioStorageProviderOptions {
   bucket?: string
   client?: S3ClientLike
+  createSignedUrl?: CreateSignedUrl
+  now?: () => Date
 }
 
 export default class MinioStorageProvider implements StorageService {
   private bucket: string
   private client: S3ClientLike
+  private createSignedUrl: CreateSignedUrl
+  private now: () => Date
 
   constructor(options: MinioStorageProviderOptions = {}) {
     this.bucket = options.bucket ?? env.get('S3_BUCKET')
@@ -39,6 +55,11 @@ export default class MinioStorageProvider implements StorageService {
         forcePathStyle: true,
         requestChecksumCalculation: 'WHEN_REQUIRED',
       })
+    this.createSignedUrl =
+      options.createSignedUrl ??
+      ((command, expiresIn, signingDate) =>
+        getSignedUrl(this.client, command, { expiresIn, signingDate }))
+    this.now = options.now ?? (() => new Date())
   }
 
   async ensurePrivateBucket(): Promise<void> {
@@ -80,6 +101,26 @@ export default class MinioStorageProvider implements StorageService {
     }
 
     return response.Body as Readable
+  }
+
+  async createTemporaryDownloadUrl(
+    input: CreateTemporaryDownloadUrlInput
+  ): Promise<TemporaryDownloadUrl> {
+    if (input.expiresInSeconds !== 300) {
+      throw new Error('Temporary download URLs must expire in 300 seconds')
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: input.key,
+      ResponseContentDisposition: `attachment; filename="${toSafeAttachmentFilename(input.filename)}"`,
+    })
+
+    const signingDate = toWholeSecond(this.now())
+    const expiresAt = new Date(signingDate.getTime() + input.expiresInSeconds * 1_000).toISOString()
+    const url = await this.createSignedUrl(command, input.expiresInSeconds, signingDate)
+
+    return { url, expiresAt }
   }
 
   async listKeys(prefix: string): Promise<string[]> {
@@ -128,6 +169,10 @@ export default class MinioStorageProvider implements StorageService {
   }
 }
 
+function toWholeSecond(date: Date) {
+  return new Date(Math.floor(date.getTime() / 1_000) * 1_000)
+}
+
 function isNotFoundError(error: unknown) {
   if (typeof error !== 'object' || error === null) {
     return false
@@ -164,4 +209,34 @@ function getS3ErrorStatus(error: unknown) {
   }
 
   return (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
+}
+
+function toSafeAttachmentFilename(filename: string) {
+  const asciiFilename = filename
+    .normalize('NFKD')
+    .replace(/\p{Mark}/gu, '')
+    .replace(/[^A-Za-z0-9._ -]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+
+  return limitAttachmentFilename(asciiFilename || 'download')
+}
+
+function limitAttachmentFilename(filename: string) {
+  if (filename.length <= MAX_ATTACHMENT_FILENAME_LENGTH) {
+    return filename
+  }
+
+  const extensionStart = filename.lastIndexOf('.')
+  const extension = filename.slice(extensionStart)
+  const hasSafeExtension =
+    extensionStart > 0 &&
+    /^\.[A-Za-z0-9]{1,16}$/.test(extension) &&
+    extension.length < MAX_ATTACHMENT_FILENAME_LENGTH
+
+  if (hasSafeExtension) {
+    return `${filename.slice(0, MAX_ATTACHMENT_FILENAME_LENGTH - extension.length)}${extension}`
+  }
+
+  return filename.slice(0, MAX_ATTACHMENT_FILENAME_LENGTH)
 }

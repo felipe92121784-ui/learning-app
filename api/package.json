@@ -67,6 +67,7 @@
     "@adonisjs/shield": "^9.0.0",
     "@aws-sdk/client-s3": "^3.1127.0",
     "@aws-sdk/lib-storage": "^3.1127.0",
+    "@aws-sdk/s3-request-presigner": "^3.1127.0",
     "@japa/api-client": "^3.2.1",
     "@tuyau/core": "^1.2.2",
     "@vinejs/vine": "^4.4.0",

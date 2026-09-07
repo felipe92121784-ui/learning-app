@@ -72,5 +72,34 @@ router
       })
       .use(middleware.auth({ guards: ['web'] }))
       .use(middleware.admin())
+
+    router
+      .group(() => {
+        router.get('access-rules', [controllers.AccessRules, 'index'])
+        router.put('access-rules', [controllers.AccessRules, 'upsert'])
+        router.delete('access-rules/:id', [controllers.AccessRules, 'destroy'])
+        router.get('access-rules/effective', [controllers.AccessRules, 'effective'])
+      })
+      .use(middleware.auth({ guards: ['web'] }))
+      .use(middleware.admin())
+
+    router
+      .group(() => {
+        router.get('materials/:id/view', [controllers.ProtectedMaterials, 'view'])
+        router.get('materials/:materialId/derivatives/:derivativeId', [
+          controllers.ProtectedMaterials,
+          'derivative',
+        ])
+        router.post('materials/:id/download-url', [controllers.ProtectedMaterials, 'downloadUrl'])
+      })
+      .use(middleware.auth({ guards: ['web'] }))
+
+    router
+      .group(() => {
+        router.get('courses', [controllers.StudentCatalog, 'index'])
+        router.get('courses/:id', [controllers.StudentCatalog, 'show'])
+      })
+      .prefix('student')
+      .use(middleware.auth({ guards: ['web'] }))
   })
   .prefix('/api/v1')

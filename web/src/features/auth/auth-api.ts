@@ -1,6 +1,8 @@
 import { queryOptions } from '@tanstack/react-query'
 import { ApiError, apiClient } from '@/lib/api-client'
 import type { AuthUser, LoginCredentials } from './auth-types'
+import { clearProtectedMaterialViews } from '../protected-viewer/protected-viewer-cache'
+import { clearStudentCatalog } from '../student-catalog/student-catalog-cache'
 
 interface ApiEnvelope<T> {
   data: T
@@ -48,7 +50,22 @@ export async function logout(): Promise<void> {
 export function profileQueryOptions() {
   return queryOptions({
     queryKey: profileQueryKey,
-    queryFn: getProfile,
+    queryFn: async ({ client }) => {
+      const user = await getProfile()
+      const previous = client.getQueryData<AuthUser | null>(profileQueryKey)
+      // Profile refresh also detects expiration or a session changed in another tab.
+      // Clear protected data before publishing the new identity to AuthProvider.
+      if (
+        !user ||
+        previous?.id !== user.id ||
+        previous.status !== user.status ||
+        user.status !== 'ACTIVE'
+      ) {
+        clearProtectedMaterialViews(client)
+        clearStudentCatalog(client)
+      }
+      return user
+    },
     retry: false,
     staleTime: 30_000,
   })

@@ -1,4 +1,5 @@
 import CourseModule from '#models/course_module'
+import AccessLog from '#models/access_log'
 import Material, { type MaterialType } from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
 import ProcessingJobService from '#services/processing_job_service'
@@ -126,7 +127,7 @@ export default class MaterialsController {
     }
 
     try {
-      await db.transaction(async (trx) => {
+      const deletionOutcome = await db.transaction(async (trx) => {
         await lockModuleForUpdate(moduleId, trx)
         const lockedMaterial = await Material.query({ client: trx })
           .where('module_id', moduleId)
@@ -134,7 +135,14 @@ export default class MaterialsController {
           .forUpdate()
           .first()
         if (!lockedMaterial) {
-          return
+          return 'not_found' as const
+        }
+        const accessLog = await AccessLog.query({ client: trx })
+          .where('material_id', lockedMaterial.id)
+          .select('id')
+          .first()
+        if (accessLog) {
+          return 'has_access_logs' as const
         }
         const derivatives = await MaterialDerivative.query({ client: trx })
           .where('material_id', lockedMaterial.id)
@@ -161,7 +169,15 @@ export default class MaterialsController {
             [temporaryOffset + 1, moduleId, lockedMaterial.position + temporaryOffset]
           )
         }
+        return 'deleted' as const
       })
+
+      if (deletionOutcome === 'has_access_logs') {
+        return response.conflict({
+          message: 'Material cannot be deleted because it has access history',
+          code: 'MATERIAL_HAS_ACCESS_LOGS',
+        })
+      }
     } catch (error) {
       logger.error({ err: error }, 'Unable to delete private material')
       return response.internalServerError({ message: 'Unable to delete material' })

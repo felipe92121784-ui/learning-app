@@ -7,6 +7,50 @@
 import { BaseModel, column } from '@adonisjs/lucid/orm'
 import { DateTime } from 'luxon'
 
+export class AccessLogSchema extends BaseModel {
+  static $columns = ['action', 'createdAt', 'id', 'ipAddress', 'materialId', 'userAgent', 'userId'] as const
+  $columns = AccessLogSchema.$columns
+  @column()
+  declare action: string
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare ipAddress: string | null
+  @column()
+  declare materialId: number
+  @column()
+  declare userAgent: string | null
+  @column()
+  declare userId: number
+}
+
+export class AccessRuleSchema extends BaseModel {
+  static $columns = ['capability', 'createdAt', 'effect', 'expiresAt', 'id', 'resourceId', 'resourceType', 'startsAt', 'updatedAt', 'userId'] as const
+  $columns = AccessRuleSchema.$columns
+  @column()
+  declare capability: string
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare effect: string
+  @column.dateTime()
+  declare expiresAt: DateTime | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare resourceId: number
+  @column()
+  declare resourceType: string
+  @column.dateTime()
+  declare startsAt: DateTime | null
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+  @column()
+  declare userId: number
+}
+
 export class AuthAccessTokenSchema extends BaseModel {
   static $columns = ['abilities', 'createdAt', 'expiresAt', 'hash', 'id', 'lastUsedAt', 'name', 'tokenableId', 'type', 'updatedAt'] as const
   $columns = AuthAccessTokenSchema.$columns
@@ -129,10 +173,12 @@ export class ModuleSchema extends BaseModel {
 }
 
 export class ProcessingJobSchema extends BaseModel {
-  static $columns = ['attempts', 'createdAt', 'id', 'kind', 'lastErrorCode', 'leaseExpiresAt', 'lockedAt', 'materialId', 'maxAttempts', 'status', 'updatedAt'] as const
+  static $columns = ['attempts', 'claimToken', 'createdAt', 'id', 'kind', 'lastErrorCode', 'leaseExpiresAt', 'lockedAt', 'materialId', 'maxAttempts', 'outputPrefix', 'pendingCleanupKeys', 'status', 'updatedAt'] as const
   $columns = ProcessingJobSchema.$columns
   @column()
   declare attempts: number
+  @column()
+  declare claimToken: string | null
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
   @column({ isPrimary: true })
@@ -149,6 +195,10 @@ export class ProcessingJobSchema extends BaseModel {
   declare materialId: number
   @column()
   declare maxAttempts: number
+  @column()
+  declare outputPrefix: string | null
+  @column()
+  declare pendingCleanupKeys: any | null
   @column()
   declare status: string
   @column.dateTime({ autoCreate: true, autoUpdate: true })

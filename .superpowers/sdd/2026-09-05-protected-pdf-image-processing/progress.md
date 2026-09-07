@@ -21,3 +21,13 @@ Task 1: fix round 2/5 — preserve existing idempotent DELETE semantics. Ruling:
 Task 1: complete — durable jobs/derivatives, transactional PDF/IMAGE enqueue, ZIP exclusion, private storage reads/listing, DB invariants and lifecycle-safe deletion reviewed. Evidence: 53 focused tests, typecheck and lint; reviewer Spec PASS and Quality PASS.
 
 Ruling: move the `sharp` package dependency from Task 3 to Task 2 — Task 2 cannot implement or typecheck the required ImageDerivativeRenderer without it; Task 3 remains owner of Poppler Docker installation and worker Compose service. Cost if wrong: Task 2 modifies package manifests one task earlier, but avoids a fake renderer or deferred type failure.
+
+Task 2: fix round 1/5 — Ruling: add nullable `processing_jobs.output_prefix` now and set it before the first derived object upload. It is durable cleanup intent: a failed worker can list/delete that private prefix before retry/final failure, even after a process crash or delete failure. Cost if wrong: one additional forward migration/model field is introduced outside Task 1, but it prevents untracked private object leaks; Task 3 must run durable-prefix cleanup before any retry and retain it until confirmed clean.
+
+Task 2: fix round 2/5 — Ruling: add nullable `processing_jobs.pending_cleanup_keys` (JSON array) and treat it as durable post-commit compensation. Never overwrite an existing `outputPrefix` before its prefix has been listed/deleted and verified clean. On replacement, commit the new derivative metadata and persist the old keys in `pending_cleanup_keys`; worker logic in Task 3 must drain that list before considering the job fully settled, retaining any failed key for retry. Cost if wrong: jobs carry bounded internal cleanup state, but avoids both metadata pointing to deleted objects and untracked private-object leaks.
+
+Task 2: complete — private workspaces, PDF/image WebP renderers, durable prefix recovery and transactional replacement lifecycle reviewed. Evidence: 17 focused tests, typecheck and lint. Ruling carried to Task 3: jobs with `pendingCleanupKeys` remain cleanup candidates even when status is SUCCEEDED; worker must drain/update them idempotently.
+
+Task 3: complete — lease/retry worker, durable pending-cleanup drain, claim fencing, Poppler Docker worker and Compose service reviewed. Evidence: 24 focused tests, typecheck/lint/build and compose config; reviewer Spec PASS and Quality PASS.
+
+Task 4: complete — allowlisted safe processing status/error metadata and ADMIN-only Portuguese UI reviewed. No derivative/viewer/download/storage exposure. Evidence: Web 118 tests, API 123 tests, typecheck/lint/build and compose config; reviewer Spec PASS and Quality PASS.

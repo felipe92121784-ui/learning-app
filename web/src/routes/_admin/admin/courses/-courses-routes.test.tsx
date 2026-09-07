@@ -70,6 +70,40 @@ const uploadSettings = [
   { type: "ZIP" as const, maxSizeBytes: 100 * 1024 * 1024 },
 ];
 
+const material = {
+  id: 45,
+  moduleId: 12,
+  title: "Guia da descoberta",
+  description: null,
+  type: "PDF" as const,
+  originalFilename: "guia.pdf",
+  mimeType: "application/pdf",
+  size: 1_024,
+  position: 0,
+  processingStatus: "READY" as const,
+  createdAt: "2026-09-04T12:00:00.000Z",
+  updatedAt: "2026-09-04T12:00:00.000Z",
+};
+
+const managedUsers = [
+  {
+    ...admin,
+    initials: "AA",
+    createdAt: "2026-09-04T12:00:00.000Z",
+    updatedAt: "2026-09-04T12:00:00.000Z",
+  },
+  {
+    id: 2,
+    fullName: "Ana Aluna",
+    email: "ana.aluna@example.test",
+    role: "STUDENT" as const,
+    status: "ACTIVE" as const,
+    initials: "AA",
+    createdAt: "2026-09-04T12:00:00.000Z",
+    updatedAt: "2026-09-04T12:00:00.000Z",
+  },
+];
+
 function renderAdminCourses(initialPath = "/admin/courses") {
   vi.stubGlobal(
     "matchMedia",
@@ -118,6 +152,7 @@ function stubCourseRequests({
     Promise.resolve(Response.json({ data: courseDetail.modules[0] })),
   reorderResponse = () =>
     Promise.resolve(Response.json({ data: courseDetail })),
+  materialsResponse = () => Promise.resolve(Response.json({ data: [] })),
   uploadSettingsResponse = () =>
     Promise.resolve(Response.json({ data: uploadSettings })),
 }: {
@@ -127,6 +162,7 @@ function stubCourseRequests({
   createModuleResponse?: () => Promise<Response>;
   updateModuleResponse?: () => Promise<Response>;
   reorderResponse?: () => Promise<Response>;
+  materialsResponse?: () => Promise<Response>;
   uploadSettingsResponse?: () => Promise<Response>;
 } = {}) {
   vi.stubEnv("VITE_API_URL", "https://api.example.test/api/v1");
@@ -152,8 +188,37 @@ function stubCourseRequests({
         return uploadSettingsResponse();
       }
 
-      if (/\/modules\/\d+\/materials$/.test(url) && !init?.method) {
+      if (url.endsWith("/users") && !init?.method) {
+        return Promise.resolve(Response.json({ data: managedUsers }));
+      }
+
+      if (url.includes("/access-rules/effective?") && !init?.method) {
+        return Promise.resolve(
+          Response.json({
+            data: {
+              view: {
+                allowed: false,
+                decision: "DENY",
+                source: "DEFAULT",
+                ruleId: null,
+              },
+              download: {
+                allowed: false,
+                decision: "DENY",
+                source: "DEFAULT",
+                ruleId: null,
+              },
+            },
+          }),
+        );
+      }
+
+      if (url.includes("/access-rules?") && !init?.method) {
         return Promise.resolve(Response.json({ data: [] }));
+      }
+
+      if (/\/modules\/\d+\/materials$/.test(url) && !init?.method) {
+        return materialsResponse();
       }
 
       if (url.endsWith("/courses") && init?.method === "POST") {
@@ -189,6 +254,8 @@ function stubCourseRequests({
 describe("administrative course routes", () => {
   afterEach(() => {
     cleanup();
+    delete (HTMLElement.prototype as { scrollIntoView?: unknown })
+      .scrollIntoView;
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -240,6 +307,83 @@ describe("administrative course routes", () => {
       courseDetail,
     );
     expect(screen.getByText("Descoberta")).toBeTruthy();
+  });
+
+  it("lets an admin manage a selected student's module permissions without a student surface", async () => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const fetchMock = stubCourseRequests({
+      materialsResponse: () => Promise.resolve(Response.json({ data: [material] })),
+    });
+    const { router } = renderAdminCourses("/admin/courses/9");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Gerenciar permissões" }),
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("heading", { name: "Gerenciar permissões" }),
+    ).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Aluno" }));
+    expect(await screen.findByRole("option", { name: "Ana Aluna" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "Ada Admin" })).toBeNull();
+    fireEvent.click(screen.getByRole("option", { name: "Ana Aluna" }));
+
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("combobox", { name: "Recurso" }),
+      ).toBeTruthy(),
+    );
+    expect(await within(dialog).findByRole("form", { name: "Permissões de acesso" })).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes(
+            "/access-rules?userId=2&resourceType=COURSE&resourceId=9",
+          ),
+        ),
+      ).toBe(true),
+    );
+
+    fireEvent.click(
+      within(dialog).getByRole("combobox", { name: "Recurso" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Módulo: Descoberta" }),
+    );
+
+    expect(await within(dialog).findByRole("form", { name: "Permissões de acesso" })).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes(
+            "/access-rules?userId=2&resourceType=MODULE&resourceId=12",
+          ),
+        ),
+      ).toBe(true),
+    );
+
+    fireEvent.click(
+      within(dialog).getByRole("combobox", { name: "Recurso" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Material: Guia da descoberta (Descoberta)" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes(
+            "/access-rules?userId=2&resourceType=MATERIAL&resourceId=45",
+          ),
+        ),
+      ).toBe(true),
+    );
+    expect(router.routeTree.toString()).not.toContain("/app/access-rules");
   });
 
   it("shows private material administration for each module without a download surface", async () => {

@@ -86,6 +86,71 @@ test.group('ProcessingJobService', (group) => {
     assert.isTrue(claims[0]!.leaseExpiresAt! > now)
   })
 
+  test('rejects a stale claimant when its guarded cleanup update affects zero rows', async ({
+    assert,
+  }) => {
+    const material = await createMaterial('IMAGE')
+    const job = await ProcessingJob.create({
+      materialId: material.id,
+      kind: 'IMAGE_DERIVATIVE',
+      status: 'PENDING',
+      attempts: 0,
+      maxAttempts: 3,
+    })
+    const service = new ProcessingJobService()
+    const now = DateTime.utc()
+    const firstClaim = await service.claimNext(now)
+    assert.isNotNull(firstClaim)
+
+    await ProcessingJob.query()
+      .where('id', job.id)
+      .update({ lease_expires_at: now.minus({ minute: 1 }).toSQL() })
+    const secondClaim = await service.claimNext(now.plus({ minutes: 6 }))
+    assert.isNotNull(secondClaim)
+
+    assert.isFalse(await service.updatePendingCleanupKeys(firstClaim!, ['derivatives/stale.webp']))
+    await job.refresh()
+    assert.equal(job.claimToken, secondClaim!.claimToken)
+    assert.isNull(job.pendingCleanupKeys)
+  })
+
+  test('does not fail a material when a stale failure transition affects zero rows', async ({
+    assert,
+  }) => {
+    const material = await createMaterial('IMAGE')
+    const job = await ProcessingJob.create({
+      materialId: material.id,
+      kind: 'IMAGE_DERIVATIVE',
+      status: 'PENDING',
+      attempts: 0,
+      maxAttempts: 3,
+    })
+    const service = new ProcessingJobService()
+    const now = DateTime.utc()
+    const firstClaim = await service.claimNext(now)
+    assert.isNotNull(firstClaim)
+
+    await ProcessingJob.query()
+      .where('id', job.id)
+      .update({ lease_expires_at: now.minus({ minute: 1 }).toSQL() })
+    const secondClaim = await service.claimNext(now.plus({ minutes: 6 }))
+    assert.isNotNull(secondClaim)
+
+    assert.isFalse(
+      await service.finishFailure(
+        firstClaim!,
+        { code: 'PDF_PAGE_LIMIT_EXCEEDED', retryable: false },
+        now.plus({ minutes: 6 })
+      )
+    )
+    await job.refresh()
+    await material.refresh()
+    assert.equal(job.status, 'RUNNING')
+    assert.equal(job.claimToken, secondClaim!.claimToken)
+    assert.equal(material.processingStatus, 'PROCESSING')
+    assert.isNull(material.processingErrorCode)
+  })
+
   test('rejects a job with attempts above its maximum', async ({ assert }) => {
     const material = await createMaterial('PDF')
 

@@ -3,6 +3,7 @@ import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
 import { DateTime } from 'luxon'
 import Course from '#models/course'
 import Material from '#models/material'
+import AccessRule from '#models/access_rule'
 
 export default class CourseModule extends BaseModel {
   static table = 'modules'
@@ -36,4 +37,10 @@ export default class CourseModule extends BaseModel {
     onQuery: (query) => query.orderBy('position', 'asc'),
   })
   declare materials: HasMany<typeof Material>
+
+  @hasMany(() => AccessRule, {
+    foreignKey: 'resourceId',
+    onQuery: (query) => query.where('resource_type', 'MODULE'),
+  })
+  declare accessRules: HasMany<typeof AccessRule>
 }

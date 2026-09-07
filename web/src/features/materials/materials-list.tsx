@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { formatBytes, materialTypeLabel, type Material } from './materials-types'
+import { formatBytes, materialTypeLabel, type Material, type MaterialProcessingStatus } from './materials-types'
 import { useDeleteMaterialMutation, useUpdateMaterialMutation } from './materials-queries'
 
 interface MaterialsListProps {
@@ -15,6 +15,15 @@ interface MaterialsListProps {
 }
 
 function errorMessage(error: string | Error) { return typeof error === 'string' ? error : error.message }
+
+function processingStatusLabel(status: MaterialProcessingStatus) {
+  return {
+    UPLOADING: 'Enviando',
+    PROCESSING: 'Processando',
+    READY: 'Pronto',
+    FAILED: 'Falha no processamento',
+  }[status]
+}
 
 export function MaterialsList({ moduleId, materials, isLoading = false, error }: MaterialsListProps) {
   const remove = useDeleteMaterialMutation()
@@ -38,8 +47,9 @@ export function MaterialsList({ moduleId, materials, isLoading = false, error }:
               <p className="font-medium">{material.title}</p>
               <p className="text-sm text-muted-foreground">{material.originalFilename} · {materialTypeLabel(material.type)} · {formatBytes(material.size)}</p>
               {material.description ? <p className="text-sm text-muted-foreground">{material.description}</p> : null}
+              {material.processingStatus === 'FAILED' ? <Alert className="mt-2" variant="destructive"><AlertDescription>Falha no processamento{material.processingErrorCode ? ` (código: ${material.processingErrorCode})` : ''}.</AlertDescription></Alert> : null}
             </div>
-            <div className="flex shrink-0 items-center gap-2"><Badge variant="secondary">{material.processingStatus === 'PROCESSING' ? 'Processando' : material.processingStatus}</Badge><Button aria-label={`Editar ${material.title}`} disabled={remove.isPending || update.isPending} onClick={() => { setEditing(material); setTitle(material.title); setDescription(material.description ?? ''); setEditValidationError(null) }} size="sm" type="button" variant="outline">Editar</Button><Button aria-label={`Excluir ${material.title}`} disabled={remove.isPending || update.isPending} onClick={() => setSelected(material)} size="sm" type="button" variant="destructive">Excluir</Button></div>
+            <div className="flex shrink-0 items-center gap-2"><Badge variant="secondary">{processingStatusLabel(material.processingStatus)}</Badge><Button aria-label={`Editar ${material.title}`} disabled={remove.isPending || update.isPending} onClick={() => { setEditing(material); setTitle(material.title); setDescription(material.description ?? ''); setEditValidationError(null) }} size="sm" type="button" variant="outline">Editar</Button><Button aria-label={`Excluir ${material.title}`} disabled={remove.isPending || update.isPending} onClick={() => setSelected(material)} size="sm" type="button" variant="destructive">Excluir</Button></div>
           </li>)}
         </ol>
       )}

@@ -4,6 +4,8 @@ import { DateTime } from 'luxon'
 import CourseModule from '#models/course_module'
 import MaterialDerivative from '#models/material_derivative'
 import ProcessingJob from '#models/processing_job'
+import AccessRule from '#models/access_rule'
+import AccessLog from '#models/access_log'
 
 export const MATERIAL_TYPES = ['PDF', 'IMAGE', 'ZIP'] as const
 export type MaterialType = (typeof MATERIAL_TYPES)[number]
@@ -73,4 +75,13 @@ export default class Material extends BaseModel {
     onQuery: (query) => query.orderBy('position', 'asc'),
   })
   declare derivatives: HasMany<typeof MaterialDerivative>
+
+  @hasMany(() => AccessRule, {
+    foreignKey: 'resourceId',
+    onQuery: (query) => query.where('resource_type', 'MATERIAL'),
+  })
+  declare accessRules: HasMany<typeof AccessRule>
+
+  @hasMany(() => AccessLog)
+  declare accessLogs: HasMany<typeof AccessLog>
 }

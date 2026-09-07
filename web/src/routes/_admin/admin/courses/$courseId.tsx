@@ -19,6 +19,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { AccessRuleForm } from "@/features/access-rules/access-rule-form";
+import { EffectiveAccessSummary } from "@/features/access-rules/effective-access-summary";
+import type { AccessResource } from "@/features/access-rules/access-rules-types";
 import { EditCourseForm } from "@/features/courses/course-form";
 import { ModuleForm } from "@/features/courses/module-form";
 import { ModulesList } from "@/features/courses/modules-list";
@@ -26,6 +36,7 @@ import { MaterialUploadForm } from "@/features/materials/material-upload-form";
 import { MaterialsList } from "@/features/materials/materials-list";
 import { useMaterialsQuery } from "@/features/materials/materials-queries";
 import type { UploadSetting } from "@/features/materials/materials-types";
+import { useUsersQuery } from "@/features/users/users-queries";
 import {
   uploadSettingsQueryOptions,
   useUploadSettingsQuery,
@@ -90,6 +101,7 @@ function CoursePage() {
   const [materialModule, setMaterialModule] = useState<CourseModule | null>(
     null,
   );
+  const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
 
   function handleCourseSubmit(input: UpdateCourseInput) {
     updateCourseMutation.mutate({ courseId, input });
@@ -217,6 +229,25 @@ function CoursePage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle>Permissões de acesso</CardTitle>
+              <CardDescription>
+                Configure o acesso individual de alunos ao curso, módulos e materiais.
+              </CardDescription>
+            </div>
+            <Button
+              onClick={() => setPermissionsDialogOpen(true)}
+              type="button"
+            >
+              Gerenciar permissões
+            </Button>
+          </div>
+        </CardHeader>
+      </Card>
+
       <section aria-labelledby="course-materials-heading" className="space-y-4">
         <div>
           <h2 className="text-2xl font-semibold" id="course-materials-heading">
@@ -306,6 +337,14 @@ function CoursePage() {
         </DialogContent>
       </Dialog>
 
+      {permissionsDialogOpen ? (
+        <AccessPermissionsDialog
+          courseId={course.id}
+          modules={course.modules}
+          onClose={() => setPermissionsDialogOpen(false)}
+        />
+      ) : null}
+
       <Dialog
         open={materialModule !== null}
         onOpenChange={(open) => !open && setMaterialModule(null)}
@@ -377,6 +416,139 @@ function CoursePage() {
         </DialogContent>
       </Dialog>
     </main>
+  );
+}
+
+function resourceValue(resource: AccessResource) {
+  return `${resource.type}:${resource.id}`;
+}
+
+function MaterialResourceOptions({ module }: { module: CourseModule }) {
+  const materialsQuery = useMaterialsQuery(module.id);
+
+  return materialsQuery.data?.map((material) => (
+    <SelectItem
+      key={`MATERIAL:${material.id}`}
+      value={resourceValue({ type: "MATERIAL", id: material.id })}
+    >
+      Material: {material.title} ({module.title})
+    </SelectItem>
+  ));
+}
+
+function AccessPermissionsDialog({
+  courseId,
+  modules,
+  onClose,
+}: {
+  courseId: number;
+  modules: CourseModule[];
+  onClose: () => void;
+}) {
+  const usersQuery = useUsersQuery();
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [resource, setResource] = useState<AccessResource>({
+    type: "COURSE",
+    id: courseId,
+  });
+  const students = (usersQuery.data ?? []).filter((user) => user.role === "STUDENT");
+
+  function selectResource(value: string) {
+    const [type, id] = value.split(":");
+    setResource({
+      type: type as AccessResource["type"],
+      id: Number(id),
+    });
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[calc(100vh-2rem)] max-w-3xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Gerenciar permissões</DialogTitle>
+          <DialogDescription>
+            Escolha um aluno e o recurso administrativo a configurar. As regras
+            diretas não concedem acesso a administradores.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="access-rule-student">
+              Aluno
+            </label>
+            <Select
+              onValueChange={(value) => setSelectedUserId(Number(value))}
+              value={selectedUserId === null ? "" : String(selectedUserId)}
+            >
+              <SelectTrigger aria-label="Aluno" id="access-rule-student">
+                <SelectValue placeholder="Selecione um aluno" />
+              </SelectTrigger>
+              <SelectContent>
+                {students.map((student) => (
+                  <SelectItem key={student.id} value={String(student.id)}>
+                    {student.fullName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {usersQuery.isPending ? (
+              <p className="text-sm text-muted-foreground">Carregando alunos…</p>
+            ) : null}
+            {usersQuery.isError ? (
+              <Alert variant="destructive">
+                <AlertDescription>
+                  Não foi possível carregar os alunos. Tente novamente.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {!usersQuery.isPending && !usersQuery.isError && students.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nenhum aluno disponível para configurar permissões.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="access-rule-resource">
+              Recurso
+            </label>
+            <Select onValueChange={selectResource} value={resourceValue(resource)}>
+              <SelectTrigger aria-label="Recurso" id="access-rule-resource">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={resourceValue({ type: "COURSE", id: courseId })}>
+                  Curso
+                </SelectItem>
+                {modules.map((module) => (
+                  <SelectItem
+                    key={`MODULE:${module.id}`}
+                    value={resourceValue({ type: "MODULE", id: module.id })}
+                  >
+                    Módulo: {module.title}
+                  </SelectItem>
+                ))}
+                {modules.map((module) => (
+                  <MaterialResourceOptions key={module.id} module={module} />
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {selectedUserId ? (
+          <div className="space-y-6">
+            <AccessRuleForm
+              onSaved={onClose}
+              resource={resource}
+              userId={selectedUserId}
+            />
+            <EffectiveAccessSummary resource={resource} userId={selectedUserId} />
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 }
 

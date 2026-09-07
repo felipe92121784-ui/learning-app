@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MaterialsList } from './materials-list'
 
 const material = { id: 2, moduleId: 9, title: 'Manual', description: 'Leia antes da aula.', type: 'PDF' as const, originalFilename: 'manual.pdf', mimeType: 'application/pdf', size: 2 * 1024 * 1024, position: 0, processingStatus: 'PROCESSING' as const, createdAt: '2026-09-05T00:00:00Z', updatedAt: null }
-function renderList() { const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } }); return render(<QueryClientProvider client={client}><MaterialsList materials={[material]} moduleId={9} /></QueryClientProvider>) }
+function renderList(overrides = {}) { const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } }); return render(<QueryClientProvider client={client}><MaterialsList materials={[{ ...material, ...overrides }]} moduleId={9} /></QueryClientProvider>) }
 describe('MaterialsList', () => {
   afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.unstubAllGlobals() })
   it('shows safe metadata and requires explicit confirmation before deletion', async () => {
@@ -21,6 +21,12 @@ describe('MaterialsList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'DELETE' })
+  })
+  it('shows a safe failed processing status without viewer or download actions', () => {
+    renderList({ processingStatus: 'FAILED' as const, processingErrorCode: 'PDF_PAGE_LIMIT_EXCEEDED' })
+    expect(screen.getByText('Falha no processamento')).toBeTruthy()
+    expect(screen.getByText(/PDF_PAGE_LIMIT_EXCEEDED/)).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /baixar|visualizar/i })).toBeNull()
   })
   it('edits title and optional description through the nested PATCH endpoint', async () => {
     vi.stubEnv('VITE_API_URL', 'https://api.example.test/api/v1')

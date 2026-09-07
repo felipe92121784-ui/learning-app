@@ -24,6 +24,8 @@ import { Route as AdminAdminCoursesNewRouteImport } from './routes/_admin/admin/
 import { Route as AdminAdminUsersIndexRouteImport } from './routes/_admin/admin/users/index'
 import { Route as AdminAdminUsersUserIdRouteImport } from './routes/_admin/admin/users/$userId'
 import { Route as AdminAdminUsersNewRouteImport } from './routes/_admin/admin/users/new'
+import { Route as AppAppCoursesCourseIdRouteImport } from './routes/_app/app/courses/$courseId'
+import { Route as AppAppCoursesCourseIdMaterialsMaterialIdRouteImport } from './routes/_app/app/courses/$courseId/materials/$materialId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -99,12 +101,23 @@ const AdminAdminUsersNewRoute = AdminAdminUsersNewRouteImport.update({
   path: '/users/new',
   getParentRoute: () => AdminAdminRoute,
 } as any)
+const AppAppCoursesCourseIdRoute = AppAppCoursesCourseIdRouteImport.update({
+  id: '/courses/$courseId',
+  path: '/courses/$courseId',
+  getParentRoute: () => AppAppRoute,
+} as any)
+const AppAppCoursesCourseIdMaterialsMaterialIdRoute =
+  AppAppCoursesCourseIdMaterialsMaterialIdRouteImport.update({
+    id: '/materials/$materialId',
+    path: '/materials/$materialId',
+    getParentRoute: () => AppAppCoursesCourseIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/admin': typeof AdminAdminRouteWithChildren
-  '/app': typeof AppAppRoute
+  '/app': typeof AppAppRouteWithChildren
   '/admin/settings': typeof AdminAdminSettingsRoute
   '/app/account': typeof AppAppAccountRoute
   '/admin/': typeof AdminAdminIndexRoute
@@ -112,13 +125,15 @@ export interface FileRoutesByFullPath {
   '/admin/courses/new': typeof AdminAdminCoursesNewRoute
   '/admin/users/$userId': typeof AdminAdminUsersUserIdRoute
   '/admin/users/new': typeof AdminAdminUsersNewRoute
+  '/app/courses/$courseId': typeof AppAppCoursesCourseIdRouteWithChildren
   '/admin/courses/': typeof AdminAdminCoursesIndexRoute
   '/admin/users/': typeof AdminAdminUsersIndexRoute
+  '/app/courses/$courseId/materials/$materialId': typeof AppAppCoursesCourseIdMaterialsMaterialIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/app': typeof AppAppRoute
+  '/app': typeof AppAppRouteWithChildren
   '/admin/settings': typeof AdminAdminSettingsRoute
   '/app/account': typeof AppAppAccountRoute
   '/admin': typeof AdminAdminIndexRoute
@@ -126,8 +141,10 @@ export interface FileRoutesByTo {
   '/admin/courses/new': typeof AdminAdminCoursesNewRoute
   '/admin/users/$userId': typeof AdminAdminUsersUserIdRoute
   '/admin/users/new': typeof AdminAdminUsersNewRoute
+  '/app/courses/$courseId': typeof AppAppCoursesCourseIdRouteWithChildren
   '/admin/courses': typeof AdminAdminCoursesIndexRoute
   '/admin/users': typeof AdminAdminUsersIndexRoute
+  '/app/courses/$courseId/materials/$materialId': typeof AppAppCoursesCourseIdMaterialsMaterialIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -136,7 +153,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
   '/_admin/admin': typeof AdminAdminRouteWithChildren
-  '/_app/app': typeof AppAppRoute
+  '/_app/app': typeof AppAppRouteWithChildren
   '/_admin/admin/settings': typeof AdminAdminSettingsRoute
   '/_app/app_/account': typeof AppAppAccountRoute
   '/_admin/admin/': typeof AdminAdminIndexRoute
@@ -144,8 +161,10 @@ export interface FileRoutesById {
   '/_admin/admin/courses/new': typeof AdminAdminCoursesNewRoute
   '/_admin/admin/users/$userId': typeof AdminAdminUsersUserIdRoute
   '/_admin/admin/users/new': typeof AdminAdminUsersNewRoute
+  '/_app/app/courses/$courseId': typeof AppAppCoursesCourseIdRouteWithChildren
   '/_admin/admin/courses/': typeof AdminAdminCoursesIndexRoute
   '/_admin/admin/users/': typeof AdminAdminUsersIndexRoute
+  '/_app/app/courses/$courseId/materials/$materialId': typeof AppAppCoursesCourseIdMaterialsMaterialIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -161,8 +180,10 @@ export interface FileRouteTypes {
     | '/admin/courses/new'
     | '/admin/users/$userId'
     | '/admin/users/new'
+    | '/app/courses/$courseId'
     | '/admin/courses/'
     | '/admin/users/'
+    | '/app/courses/$courseId/materials/$materialId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -175,8 +196,10 @@ export interface FileRouteTypes {
     | '/admin/courses/new'
     | '/admin/users/$userId'
     | '/admin/users/new'
+    | '/app/courses/$courseId'
     | '/admin/courses'
     | '/admin/users'
+    | '/app/courses/$courseId/materials/$materialId'
   id:
     | '__root__'
     | '/'
@@ -192,8 +215,10 @@ export interface FileRouteTypes {
     | '/_admin/admin/courses/new'
     | '/_admin/admin/users/$userId'
     | '/_admin/admin/users/new'
+    | '/_app/app/courses/$courseId'
     | '/_admin/admin/courses/'
     | '/_admin/admin/users/'
+    | '/_app/app/courses/$courseId/materials/$materialId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -310,6 +335,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAdminUsersNewRouteImport
       parentRoute: typeof AdminAdminRoute
     }
+    '/_app/app/courses/$courseId': {
+      id: '/_app/app/courses/$courseId'
+      path: '/courses/$courseId'
+      fullPath: '/app/courses/$courseId'
+      preLoaderRoute: typeof AppAppCoursesCourseIdRouteImport
+      parentRoute: typeof AppAppRoute
+    }
+    '/_app/app/courses/$courseId/materials/$materialId': {
+      id: '/_app/app/courses/$courseId/materials/$materialId'
+      path: '/materials/$materialId'
+      fullPath: '/app/courses/$courseId/materials/$materialId'
+      preLoaderRoute: typeof AppAppCoursesCourseIdMaterialsMaterialIdRouteImport
+      parentRoute: typeof AppAppCoursesCourseIdRoute
+    }
   }
 }
 
@@ -349,13 +388,38 @@ const AdminRouteChildren: AdminRouteChildren = {
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
+interface AppAppCoursesCourseIdRouteChildren {
+  AppAppCoursesCourseIdMaterialsMaterialIdRoute: typeof AppAppCoursesCourseIdMaterialsMaterialIdRoute
+}
+
+const AppAppCoursesCourseIdRouteChildren: AppAppCoursesCourseIdRouteChildren = {
+  AppAppCoursesCourseIdMaterialsMaterialIdRoute:
+    AppAppCoursesCourseIdMaterialsMaterialIdRoute,
+}
+
+const AppAppCoursesCourseIdRouteWithChildren =
+  AppAppCoursesCourseIdRoute._addFileChildren(
+    AppAppCoursesCourseIdRouteChildren,
+  )
+
+interface AppAppRouteChildren {
+  AppAppCoursesCourseIdRoute: typeof AppAppCoursesCourseIdRouteWithChildren
+}
+
+const AppAppRouteChildren: AppAppRouteChildren = {
+  AppAppCoursesCourseIdRoute: AppAppCoursesCourseIdRouteWithChildren,
+}
+
+const AppAppRouteWithChildren =
+  AppAppRoute._addFileChildren(AppAppRouteChildren)
+
 interface AppRouteChildren {
-  AppAppRoute: typeof AppAppRoute
+  AppAppRoute: typeof AppAppRouteWithChildren
   AppAppAccountRoute: typeof AppAppAccountRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppAppRoute: AppAppRoute,
+  AppAppRoute: AppAppRouteWithChildren,
   AppAppAccountRoute: AppAppAccountRoute,
 }
 

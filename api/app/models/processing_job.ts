@@ -34,8 +34,26 @@ export default class ProcessingJob extends BaseModel {
   @column.dateTime()
   declare leaseExpiresAt: DateTime | null
 
+  @column({ serializeAs: null })
+  declare claimToken: string | null
+
   @column()
   declare lastErrorCode: MaterialProcessingErrorCode | null
+
+  @column({ serializeAs: null })
+  declare outputPrefix: string | null
+
+  @column({
+    serializeAs: null,
+    prepare: (value: string[] | null) => (value === null ? null : JSON.stringify(value)),
+    consume: (value: unknown) => {
+      if (value === null) {
+        return null
+      }
+      return (typeof value === 'string' ? JSON.parse(value) : value) as string[]
+    },
+  })
+  declare pendingCleanupKeys: string[] | null
 
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime

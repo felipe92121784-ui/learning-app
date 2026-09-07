@@ -4,6 +4,13 @@ export type MaterialType = (typeof MATERIAL_TYPES)[number]
 
 export type MaterialProcessingStatus = 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED'
 
+export type MaterialProcessingErrorCode =
+  | 'PDF_PAGE_LIMIT_EXCEEDED'
+  | 'ORIGINAL_NOT_FOUND'
+  | 'INVALID_INPUT'
+  | 'STORAGE_ERROR'
+  | 'PROCESSING_ERROR'
+
 export interface Material {
   id: number
   moduleId: number
@@ -15,6 +22,7 @@ export interface Material {
   size: number
   position: number
   processingStatus: MaterialProcessingStatus
+  processingErrorCode?: MaterialProcessingErrorCode
   createdAt: string
   updatedAt: string | null
 }

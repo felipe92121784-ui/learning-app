@@ -1,5 +1,6 @@
 import Course from '#models/course'
 import CourseModule from '#models/course_module'
+import AccessLog from '#models/access_log'
 import Material from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
 import ProcessingJob from '#models/processing_job'
@@ -157,6 +158,37 @@ test.group('Material persistence contracts', (group) => {
       updatedAt: material.updatedAt,
     })
     assert.notProperty(serialized, 'storageKey')
+  })
+
+  test('serializes a safe failed processing code without private derivative metadata', ({
+    assert,
+  }) => {
+    const material = new Material()
+    material.id = 7
+    material.moduleId = 2
+    material.title = 'Handbook'
+    material.description = null
+    material.type = 'PDF'
+    material.storageKey = 'originals/private-handbook.pdf'
+    material.originalFilename = 'handbook.pdf'
+    material.mimeType = 'application/pdf'
+    material.size = 1024
+    material.position = 0
+    material.processingStatus = 'FAILED'
+    material.processingErrorCode = 'PDF_PAGE_LIMIT_EXCEEDED'
+
+    const serialized = new MaterialTransformer(material).toObject()
+
+    assert.deepInclude(serialized, {
+      processingStatus: 'FAILED',
+      processingErrorCode: 'PDF_PAGE_LIMIT_EXCEEDED',
+    })
+    assert.notProperty(serialized, 'storageKey')
+    assert.notProperty(serialized, 'derivatives')
+    assert.notInclude(JSON.stringify(serialized), 'originals/')
+
+    material.processingErrorCode = 'INTERNAL_EXCEPTION_DETAIL' as never
+    assert.notProperty(new MaterialTransformer(material).toObject(), 'processingErrorCode')
   })
 
   test('does not serialize a private derivative storage key', ({ assert }) => {
@@ -1239,6 +1271,202 @@ test.group('Administrative material uploads', (group) => {
     assert.isNull(await ProcessingJob.findBy('material_id', material.id))
     assert.lengthOf(await MaterialDerivative.query().where('material_id', material.id), 0)
     assert.isNull(await Material.find(material.id))
+  })
+
+  test('refuses deletion with access history before removing private objects', async ({
+    assert,
+    client,
+  }) => {
+    const session = await login(client, admin)
+    const created = await withCsrf(client.post(`/api/v1/modules/${module.id}/materials`), session)
+      .field('title', 'Audited manual')
+      .file('file', pdfFile, { filename: 'audited.pdf', contentType: 'application/pdf' })
+    created.assertStatus(201)
+    const material = await Material.findOrFail(created.body().data.id)
+    const derivativeKey = `derivatives/${material.id}/run-a/page-1.webp`
+    const derivative = await MaterialDerivative.create({
+      materialId: material.id,
+      kind: 'PDF_PAGE',
+      storageKey: derivativeKey,
+      mimeType: 'image/webp',
+      pageNumber: 1,
+      width: 100,
+      height: 100,
+      position: 0,
+    })
+    const job = await ProcessingJob.findByOrFail('material_id', material.id)
+    const accessLog = await AccessLog.create({
+      userId: student.id,
+      materialId: material.id,
+      action: 'VIEW_MATERIAL',
+      ipAddress: '203.0.113.10',
+      userAgent: 'Material deletion regression test',
+    })
+    storedKeys.add(derivativeKey)
+    storageOperations = []
+
+    const response = await withCsrf(
+      client.delete(`/api/v1/modules/${module.id}/materials/${material.id}`),
+      session
+    )
+
+    response.assertStatus(409)
+    assert.deepEqual(response.body(), {
+      message: 'Material cannot be deleted because it has access history',
+      code: 'MATERIAL_HAS_ACCESS_LOGS',
+    })
+    assert.deepEqual(storageOperations, [])
+    assert.isTrue(storedKeys.has(material.storageKey))
+    assert.isTrue(storedKeys.has(derivativeKey))
+    assert.isNotNull(await Material.find(material.id))
+    assert.isNotNull(await MaterialDerivative.find(derivative.id))
+    assert.isNotNull(await ProcessingJob.find(job.id))
+    const persistedAccessLog = await AccessLog.findOrFail(accessLog.id)
+    assert.equal(persistedAccessLog.materialId, material.id)
+  })
+
+  test('waits for an in-flight access log and then refuses deletion before storage', async ({
+    assert,
+    client,
+  }) => {
+    const session = await login(client, admin)
+    const created = await withCsrf(client.post(`/api/v1/modules/${module.id}/materials`), session)
+      .field('title', 'Concurrently audited manual')
+      .file('file', pdfFile, {
+        filename: 'concurrently-audited.pdf',
+        contentType: 'application/pdf',
+      })
+    created.assertStatus(201)
+    const material = await Material.findOrFail(created.body().data.id)
+    storageOperations = []
+    const writer = await db.transaction()
+    let writerCompleted = false
+
+    try {
+      await writer.rawQuery("SET LOCAL lock_timeout = '2s'")
+      const accessLog = await AccessLog.create(
+        {
+          userId: student.id,
+          materialId: material.id,
+          action: 'VIEW_MATERIAL',
+          ipAddress: '203.0.113.11',
+          userAgent: 'Concurrent access-log writer',
+        },
+        { client: writer }
+      )
+      const deletionResponse = Promise.resolve(
+        withCsrf(client.delete(`/api/v1/modules/${module.id}/materials/${material.id}`), session)
+      )
+      const outcomeBeforeCommit = await Promise.race([
+        deletionResponse.then(() => 'settled' as const),
+        new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 50)),
+      ])
+      const storageBeforeCommit = [...storageOperations]
+
+      await writer.commit()
+      writerCompleted = true
+      const response = await deletionResponse
+
+      assert.equal(outcomeBeforeCommit, 'blocked')
+      assert.deepEqual(storageBeforeCommit, [])
+      response.assertStatus(409)
+      response.assertBody({
+        message: 'Material cannot be deleted because it has access history',
+        code: 'MATERIAL_HAS_ACCESS_LOGS',
+      })
+      assert.deepEqual(storageOperations, [])
+      assert.isTrue(storedKeys.has(material.storageKey))
+      assert.isNotNull(await Material.find(material.id))
+      const persistedAccessLog = await AccessLog.findOrFail(accessLog.id)
+      assert.equal(persistedAccessLog.materialId, material.id)
+    } finally {
+      if (!writerCompleted) {
+        await writer.rollback()
+      }
+    }
+  })
+
+  test('blocks a late access log until deletion commits without a storage/FK rollback', async ({
+    assert,
+    client,
+  }) => {
+    const session = await login(client, admin)
+    const created = await withCsrf(client.post(`/api/v1/modules/${module.id}/materials`), session)
+      .field('title', 'Concurrently deleted manual')
+      .file('file', pdfFile, {
+        filename: 'concurrently-deleted.pdf',
+        contentType: 'application/pdf',
+      })
+    created.assertStatus(201)
+    const material = await Material.findOrFail(created.body().data.id)
+    storageOperations = []
+    const deleteObjectBeforeAccessLogRace = MinioStorageProvider.prototype.deleteObject
+    let signalDeletionStarted!: () => void
+    let allowDeletion!: () => void
+    const deletionStarted = new Promise<void>((resolve) => (signalDeletionStarted = resolve))
+    const deletionAllowed = new Promise<void>((resolve) => (allowDeletion = resolve))
+    MinioStorageProvider.prototype.deleteObject = async (key) => {
+      if (key === material.storageKey) {
+        signalDeletionStarted()
+        await deletionAllowed
+      }
+      storageOperations.push(`delete:${key}`)
+      storedKeys.delete(key)
+    }
+
+    const deletionResponse = Promise.resolve(
+      withCsrf(client.delete(`/api/v1/modules/${module.id}/materials/${material.id}`), session)
+    )
+    await deletionStarted
+    const writer = await db.transaction()
+    let writerCompleted = false
+
+    try {
+      await writer.rawQuery("SET LOCAL lock_timeout = '2s'")
+      const accessLogOutcome = AccessLog.create(
+        {
+          userId: student.id,
+          materialId: material.id,
+          action: 'VIEW_MATERIAL',
+          ipAddress: '203.0.113.12',
+          userAgent: 'Late concurrent access-log writer',
+        },
+        { client: writer }
+      ).then(
+        () => ({ kind: 'created' as const }),
+        (error: unknown) => ({ kind: 'rejected' as const, error })
+      )
+      const outcomeBeforeRelease = await Promise.race([
+        accessLogOutcome,
+        new Promise<{ kind: 'blocked' }>((resolve) =>
+          setTimeout(() => resolve({ kind: 'blocked' }), 50)
+        ),
+      ])
+
+      allowDeletion()
+      const response = await deletionResponse
+      const outcomeAfterCommit = await accessLogOutcome
+      await writer.rollback()
+      writerCompleted = true
+
+      assert.equal(outcomeBeforeRelease.kind, 'blocked')
+      response.assertStatus(204)
+      assert.equal(outcomeAfterCommit.kind, 'rejected')
+      if (outcomeAfterCommit.kind === 'rejected') {
+        assert.equal((outcomeAfterCommit.error as { code?: string }).code, '23503')
+      }
+      assert.deepEqual(storageOperations, [`delete:${material.storageKey}`])
+      assert.isFalse(storedKeys.has(material.storageKey))
+      assert.isNull(await Material.find(material.id))
+      assert.lengthOf(await AccessLog.query().where('material_id', material.id), 0)
+    } finally {
+      allowDeletion()
+      if (!writerCompleted) {
+        await writer.rollback()
+      }
+      await deletionResponse
+      MinioStorageProvider.prototype.deleteObject = deleteObjectBeforeAccessLogRace
+    }
   })
 
   test('prevents a derivative from being committed after deletion acquires the material lifecycle lock', async ({
