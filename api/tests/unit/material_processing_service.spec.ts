@@ -6,7 +6,7 @@ import ImageTileManifest from '#models/image_tile_manifest'
 import ProcessingJob from '#models/processing_job'
 import MaterialProcessingService, { ProcessingFailure } from '#services/material_processing_service'
 import type { ImageRenderResult } from '#services/image_derivative_renderer'
-import ProcessingJobService from '#services/processing_job_service'
+import ProcessingJobService, { ProcessingJobLeaseLostError } from '#services/processing_job_service'
 import ProcessingWorker from '#services/processing_worker'
 import MaterialsController from '#controllers/materials_controller'
 import MinioStorageProvider from '#services/minio_storage_provider'
@@ -336,7 +336,7 @@ test.group('MaterialProcessingService', (group) => {
     assert.isNull(job.pendingCleanupKeys)
   })
 
-  test('uses the controller lifecycle transaction when deletion wins the material lock', async ({
+  test('rejects processing after deletion removes metadata before storage cleanup', async ({
     assert,
   }) => {
     const { job, material, module } = await createRunningJob('IMAGE')
@@ -365,19 +365,11 @@ test.group('MaterialProcessingService', (group) => {
         logger: { error: () => undefined },
       } as never)
       await deletionLocked
-      const processing = rejected(() => service.process(job.id, DateTime.utc(), job.claimToken!))
-      const blocked = await Promise.race([
-        processing.then(() => 'settled'),
-        new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 50)),
-      ])
-      assert.equal(blocked, 'blocked')
+      const error = await rejected(() => service.process(job.id, DateTime.utc(), job.claimToken!))
+      assert.instanceOf(error, ProcessingJobLeaseLostError)
 
       releaseDeletion()
       await deletion
-      const error = await processing
-      assert.instanceOf(error, ProcessingFailure)
-      assert.equal((error as ProcessingFailure).code, 'PROCESSING_FAILED')
-      assert.deepEqual(storage.deletedKeys, storage.putKeys)
       assert.isNull(await Material.find(material.id))
       assert.lengthOf(await MaterialDerivative.query().where('material_id', material.id), 0)
     } finally {

@@ -5,6 +5,7 @@ import type {
   SafeProcessingFailure,
 } from '#services/processing_job_service'
 import { ProcessingFailure } from '#services/material_processing_service'
+import StorageCleanupService from '#services/storage_cleanup_service'
 import type { StorageService } from '#services/storage_service'
 import { DateTime } from 'luxon'
 
@@ -16,20 +17,39 @@ interface ProcessingWorkerOptions {
   jobs: ProcessingJobService
   processor: ProcessingService
   storage: StorageService
+  cleanupTasks?: StorageCleanupService
 }
 
 export default class ProcessingWorker {
   private jobs: ProcessingJobService
   private processor: ProcessingService
   private storage: StorageService
+  private cleanupTasks: StorageCleanupService
 
   constructor(options: ProcessingWorkerOptions) {
     this.jobs = options.jobs
     this.processor = options.processor
     this.storage = options.storage
+    this.cleanupTasks = options.cleanupTasks ?? new StorageCleanupService()
   }
 
   async runOnce(now = DateTime.utc()): Promise<boolean> {
+    const cleanupTask = await this.cleanupTasks.claimNext(now)
+    if (cleanupTask) {
+      try {
+        await this.cleanupTasks.drain(cleanupTask, this.storage)
+        if (!(await this.cleanupTasks.finish(cleanupTask))) {
+          throw new ProcessingJobLeaseLostError()
+        }
+      } catch (error) {
+        if (error instanceof ProcessingJobLeaseLostError) {
+          return true
+        }
+        await this.cleanupTasks.release(cleanupTask, now)
+      }
+      return true
+    }
+
     const job = await this.jobs.claimNext(now)
     if (!job) {
       return false

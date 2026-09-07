@@ -3,7 +3,9 @@ import AccessLog from '#models/access_log'
 import Material, { type MaterialType } from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
 import ImageTileManifest from '#models/image_tile_manifest'
+import ProcessingJob from '#models/processing_job'
 import ProcessingJobService from '#services/processing_job_service'
+import StorageCleanupService from '#services/storage_cleanup_service'
 import UploadSetting from '#models/upload_setting'
 import MinioStorageProvider from '#services/minio_storage_provider'
 import MaterialTransformer from '#transformers/material_transformer'
@@ -18,10 +20,12 @@ import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
 import { ValidationError } from '@vinejs/vine'
 import { createReadStream } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { DateTime } from 'luxon'
 
 export default class MaterialsController {
   private storage = new MinioStorageProvider()
   private processingJobs = new ProcessingJobService()
+  private cleanupTasks = new StorageCleanupService()
 
   async index({ params, serialize }: HttpContext) {
     const moduleId = parseRouteId(params.moduleId, 'moduleId')
@@ -152,18 +156,25 @@ export default class MaterialsController {
           .where('material_id', lockedMaterial.id)
           .forUpdate()
           .first()
+        const jobs = await ProcessingJob.query({ client: trx })
+          .where('material_id', lockedMaterial.id)
+          .forUpdate()
         const [countRow] = await Material.query({ client: trx })
           .where('module_id', moduleId)
           .count('* as total')
         const temporaryOffset = Number(countRow.$extras.total)
 
-        for (const derivative of derivatives) {
-          await deletePrivateObject(this.storage, derivative.storageKey)
-        }
-        if (tileManifest) {
-          await deletePrivatePrefix(this.storage, tileManifest.storagePrefix)
-        }
-        await deletePrivateObject(this.storage, lockedMaterial.storageKey)
+        const cleanupTask = await this.cleanupTasks.schedule(trx, {
+          storagePrefixes: [
+            ...(tileManifest ? [tileManifest.storagePrefix] : []),
+            ...jobs.flatMap((job) => (job.outputPrefix ? [job.outputPrefix] : [])),
+          ],
+          objectKeys: [
+            ...derivatives.map((derivative) => derivative.storageKey),
+            ...jobs.flatMap((job) => job.pendingCleanupKeys ?? []),
+            lockedMaterial.storageKey,
+          ],
+        })
         await lockedMaterial.related('jobs').query().delete()
         await lockedMaterial.related('derivatives').query().delete()
         await lockedMaterial.related('imageTileManifest').query().delete()
@@ -178,7 +189,7 @@ export default class MaterialsController {
             [temporaryOffset + 1, moduleId, lockedMaterial.position + temporaryOffset]
           )
         }
-        return 'deleted' as const
+        return { kind: 'deleted' as const, cleanupTaskId: cleanupTask.id }
       })
 
       if (deletionOutcome === 'has_access_logs') {
@@ -187,12 +198,33 @@ export default class MaterialsController {
           code: 'MATERIAL_HAS_ACCESS_LOGS',
         })
       }
+      if (deletionOutcome === 'not_found') {
+        return response.noContent()
+      }
+      await this.runCleanupTask(deletionOutcome.cleanupTaskId, logger)
     } catch (error) {
       logger.error({ err: error }, 'Unable to delete private material')
       return response.internalServerError({ message: 'Unable to delete material' })
     }
 
     return response.noContent()
+  }
+
+  private async runCleanupTask(taskId: number, logger: HttpContext['logger']) {
+    const task = await this.cleanupTasks.claim(taskId, DateTime.utc())
+    if (!task) {
+      return
+    }
+
+    try {
+      await this.cleanupTasks.drain(task, this.storage)
+      if (!(await this.cleanupTasks.finish(task))) {
+        throw new Error('Storage cleanup task lease was lost')
+      }
+    } catch (error) {
+      await this.cleanupTasks.release(task, DateTime.utc())
+      logger.error({ err: error }, 'Unable to clean deleted private material')
+    }
   }
 }
 
@@ -218,43 +250,4 @@ function parseRouteId(value: string, field: string) {
   }
 
   return id
-}
-
-function isMissingObjectError(error: unknown) {
-  if (typeof error !== 'object' || error === null) {
-    return false
-  }
-
-  const response = error as {
-    name?: string
-    code?: string
-    $metadata?: { httpStatusCode?: number }
-  }
-  return (
-    response.name === 'NotFound' ||
-    response.name === 'NoSuchKey' ||
-    response.code === 'NoSuchKey' ||
-    response.$metadata?.httpStatusCode === 404
-  )
-}
-
-async function deletePrivateObject(storage: MinioStorageProvider, key: string) {
-  try {
-    await storage.deleteObject(key)
-  } catch (error) {
-    if (!isMissingObjectError(error)) {
-      throw error
-    }
-  }
-}
-
-async function deletePrivatePrefix(storage: MinioStorageProvider, prefix: string) {
-  const keys = await storage.listKeys(prefix)
-  for (const key of keys) {
-    await deletePrivateObject(storage, key)
-  }
-  const remainingKeys = await storage.listKeys(prefix)
-  if (remainingKeys.length > 0) {
-    throw new Error('Private tile prefix cleanup left objects behind')
-  }
 }

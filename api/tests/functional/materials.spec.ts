@@ -5,8 +5,11 @@ import Material from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
 import ImageTileManifest from '#models/image_tile_manifest'
 import ProcessingJob from '#models/processing_job'
+import StorageCleanupTask from '#models/storage_cleanup_task'
 import { cleanupMultipartFile } from '#middleware/multipart_cleanup_middleware'
 import MinioStorageProvider from '#services/minio_storage_provider'
+import ProcessingJobService from '#services/processing_job_service'
+import ProcessingWorker from '#services/processing_worker'
 import UploadSetting from '#models/upload_setting'
 import MaterialTransformer from '#transformers/material_transformer'
 import UploadSettingTransformer from '#transformers/upload_setting_transformer'
@@ -1319,6 +1322,103 @@ test.group('Administrative material uploads', (group) => {
     assert.isFalse(storedKeys.has(tileKeys[1]))
   })
 
+  test('does not keep a published tile manifest after prefix deletion partially fails', async ({
+    assert,
+    client,
+  }) => {
+    const session = await login(client, admin)
+    const created = await withCsrf(client.post(`/api/v1/modules/${module.id}/materials`), session)
+      .field('title', 'Partially deleted tiled manual')
+      .file('file', pngFile, { filename: 'partial-tiles.png', contentType: 'image/png' })
+    created.assertStatus(201)
+    const material = await Material.findOrFail(created.body().data.id)
+    const prefix = `derivatives/${material.id}/partial-tile-run/`
+    const tileKeys = [`${prefix}tiles/0/0/0.webp`, `${prefix}tiles/1/0/0.webp`]
+    await ImageTileManifest.create({
+      materialId: material.id,
+      storagePrefix: prefix,
+      width: 4097,
+      height: 257,
+      tileSize: 256,
+      minLevel: 0,
+      maxLevel: 13,
+    })
+    storedKeys.add(tileKeys[0])
+    storedKeys.add(tileKeys[1])
+    const deleteObjectBeforeFailure = MinioStorageProvider.prototype.deleteObject
+    let deletes = 0
+    MinioStorageProvider.prototype.deleteObject = async (key) => {
+      deletes += 1
+      if (deletes === 2) {
+        throw new Error('object storage unavailable')
+      }
+      storageOperations.push(`delete:${key}`)
+      storedKeys.delete(key)
+    }
+
+    try {
+      const response = await withCsrf(
+        client.delete(`/api/v1/modules/${module.id}/materials/${material.id}`),
+        session
+      )
+
+      response.assertStatus(204)
+      assert.isNull(await Material.find(material.id))
+      assert.isNull(await ImageTileManifest.findBy('material_id', material.id))
+    } finally {
+      MinioStorageProvider.prototype.deleteObject = deleteObjectBeforeFailure
+    }
+
+    const cleanupTask = await StorageCleanupTask.query().firstOrFail()
+    assert.deepEqual(cleanupTask.storagePrefixes, [prefix])
+    assert.include(cleanupTask.objectKeys, material.storageKey)
+    const worker = new ProcessingWorker({
+      jobs: new ProcessingJobService(),
+      processor: { async process() {} },
+      storage: new MinioStorageProvider(),
+    })
+    assert.isTrue(await worker.runOnce())
+    assert.isNull(await StorageCleanupTask.find(cleanupTask.id))
+    assert.isFalse(storedKeys.has(tileKeys[0]))
+    assert.isFalse(storedKeys.has(tileKeys[1]))
+  })
+
+  test('cleans prefixes and object keys retained by a job when its material is deleted', async ({
+    assert,
+    client,
+  }) => {
+    const session = await login(client, admin)
+    const created = await withCsrf(client.post(`/api/v1/modules/${module.id}/materials`), session)
+      .field('title', 'Reprocessed tiled manual')
+      .file('file', pngFile, { filename: 'reprocessed-tiles.png', contentType: 'image/png' })
+    created.assertStatus(201)
+    const material = await Material.findOrFail(created.body().data.id)
+    const job = await ProcessingJob.findByOrFail('material_id', material.id)
+    const oldPrefix = `derivatives/${material.id}/former-tile-run/`
+    const oldTileKeys = [`${oldPrefix}tiles/0/0/0.webp`, `${oldPrefix}tiles/1/0/0.webp`]
+    const pendingKey = `derivatives/${material.id}/former-preview.webp`
+    job.merge({
+      status: 'SUCCEEDED',
+      outputPrefix: oldPrefix,
+      pendingCleanupKeys: [pendingKey],
+    })
+    await job.save()
+    storedKeys.add(oldTileKeys[0])
+    storedKeys.add(oldTileKeys[1])
+    storedKeys.add(pendingKey)
+    storageOperations = []
+
+    const response = await withCsrf(
+      client.delete(`/api/v1/modules/${module.id}/materials/${material.id}`),
+      session
+    )
+
+    response.assertStatus(204)
+    assert.isFalse(storedKeys.has(oldTileKeys[0]))
+    assert.isFalse(storedKeys.has(oldTileKeys[1]))
+    assert.isFalse(storedKeys.has(pendingKey))
+  })
+
   test('refuses deletion with access history before removing private objects', async ({
     assert,
     client,
@@ -1432,7 +1532,7 @@ test.group('Administrative material uploads', (group) => {
     }
   })
 
-  test('blocks a late access log until deletion commits without a storage/FK rollback', async ({
+  test('makes a material inaccessible before physical cleanup begins', async ({
     assert,
     client,
   }) => {
@@ -1495,7 +1595,7 @@ test.group('Administrative material uploads', (group) => {
       await writer.rollback()
       writerCompleted = true
 
-      assert.equal(outcomeBeforeRelease.kind, 'blocked')
+      assert.equal(outcomeBeforeRelease.kind, 'rejected')
       response.assertStatus(204)
       assert.equal(outcomeAfterCommit.kind, 'rejected')
       if (outcomeAfterCommit.kind === 'rejected') {
@@ -1515,7 +1615,7 @@ test.group('Administrative material uploads', (group) => {
     }
   })
 
-  test('prevents a derivative from being committed after deletion acquires the material lifecycle lock', async ({
+  test('prevents a derivative from being committed after deletion makes metadata inaccessible', async ({
     assert,
     client,
   }) => {
@@ -1568,7 +1668,7 @@ test.group('Administrative material uploads', (group) => {
         derivativeOutcome,
         new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 50)),
       ])
-      assert.equal(outcomeBeforeRelease, 'blocked')
+      assert.equal(outcomeBeforeRelease, 'rejected')
 
       allowDeletion()
       const deletedResponse = await deletionResponse
