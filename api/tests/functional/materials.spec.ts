@@ -26,6 +26,7 @@ import type { HttpContext } from '@adonisjs/core/http'
 import { readdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname } from 'node:path'
+import { DateTime } from 'luxon'
 
 const initialPassword = 'initial-password-123'
 
@@ -1377,7 +1378,7 @@ test.group('Administrative material uploads', (group) => {
       processor: { async process() {} },
       storage: new MinioStorageProvider(),
     })
-    assert.isTrue(await worker.runOnce())
+    assert.isTrue(await worker.runOnce(DateTime.utc().plus({ seconds: 6 })))
     assert.isNull(await StorageCleanupTask.find(cleanupTask.id))
     assert.isFalse(storedKeys.has(tileKeys[0]))
     assert.isFalse(storedKeys.has(tileKeys[1]))

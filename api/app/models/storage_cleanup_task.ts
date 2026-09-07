@@ -29,6 +29,12 @@ export default class StorageCleanupTask extends BaseModel {
   @column({ serializeAs: null })
   declare claimToken: string | null
 
+  @column()
+  declare attempts: number
+
+  @column.dateTime()
+  declare nextAttemptAt: DateTime
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 

@@ -7,6 +7,9 @@ import { DateTime, type DateTime as DateTimeType } from 'luxon'
 
 export type ClaimedStorageCleanupTask = StorageCleanupTask & { claimToken: string }
 
+const CLEANUP_RETRY_BASE_SECONDS = 5
+const CLEANUP_RETRY_MAX_SECONDS = 300
+
 export default class StorageCleanupService {
   async schedule(
     trx: TransactionClientContract,
@@ -27,6 +30,7 @@ export default class StorageCleanupService {
         .where((query) => {
           query.whereNull('locked_at').orWhere('lease_expires_at', '<=', now.toSQL()!)
         })
+        .where('next_attempt_at', '<=', now.toSQL()!)
         .orderBy('id', 'asc')
         .forUpdate()
         .skipLocked()
@@ -53,6 +57,7 @@ export default class StorageCleanupService {
         .where((query) => {
           query.whereNull('locked_at').orWhere('lease_expires_at', '<=', now.toSQL()!)
         })
+        .where('next_attempt_at', '<=', now.toSQL()!)
         .forUpdate()
         .first()
       if (!task) {
@@ -76,9 +81,12 @@ export default class StorageCleanupService {
   }
 
   async release(task: ClaimedStorageCleanupTask, now: DateTimeType): Promise<boolean> {
+    const attempts = task.attempts + 1
     const updated = await this.owned(task).update({
+      attempts,
       locked_at: null,
       lease_expires_at: null,
+      next_attempt_at: now.plus({ seconds: retryDelaySeconds(attempts) }).toSQL(),
       updated_at: now.toSQL(),
     })
     return updated[0] === 1
@@ -107,6 +115,10 @@ export default class StorageCleanupService {
       .where('claim_token', task.claimToken)
       .where('lease_expires_at', '>', DateTime.utc().toSQL()!)
   }
+}
+
+function retryDelaySeconds(attempts: number): number {
+  return Math.min(CLEANUP_RETRY_MAX_SECONDS, CLEANUP_RETRY_BASE_SECONDS * 2 ** (attempts - 1))
 }
 
 async function deletePrivateObject(storage: StorageService, key: string): Promise<void> {

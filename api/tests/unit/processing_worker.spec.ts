@@ -2,6 +2,7 @@ import Course from '#models/course'
 import CourseModule from '#models/course_module'
 import Material from '#models/material'
 import ProcessingJob from '#models/processing_job'
+import StorageCleanupTask from '#models/storage_cleanup_task'
 import { ProcessingFailure } from '#services/material_processing_service'
 import ProcessingWorker from '#services/processing_worker'
 import ProcessingJobService from '#services/processing_job_service'
@@ -125,6 +126,33 @@ test.group('ProcessingWorker', (group) => {
     assert.isNull(job.pendingCleanupKeys)
     assert.deepEqual(processor.processedJobIds, [])
     assert.isFalse(storage.keys.has('derivatives/abandoned/preview.webp'))
+  })
+
+  test('processes a pending job before retrying a failed cleanup task that is not due', async ({
+    assert,
+  }) => {
+    const job = await createJob()
+    await StorageCleanupTask.create({
+      storagePrefixes: [],
+      objectKeys: ['derivatives/deleted-material/orphan.webp'],
+    })
+    const processor = succeedingProcessor()
+    const storage = new MemoryStorage(['derivatives/deleted-material/orphan.webp'])
+    storage.failKey = 'derivatives/deleted-material/orphan.webp'
+    const worker = new ProcessingWorker({ jobs: new ProcessingJobService(), processor, storage })
+    const now = DateTime.utc()
+
+    assert.isTrue(await worker.runOnce(now))
+    await job.refresh()
+    assert.equal(job.status, 'PENDING')
+    const cleanupTask = await StorageCleanupTask.query().firstOrFail()
+    assert.equal(cleanupTask.attempts, 1)
+    assert.isAbove(cleanupTask.nextAttemptAt.toMillis(), now.plus({ seconds: 1 }).toMillis())
+
+    assert.isTrue(await worker.runOnce(now.plus({ seconds: 1 })))
+    await job.refresh()
+    assert.equal(job.status, 'SUCCEEDED')
+    assert.deepEqual(processor.processedJobIds, [job.id])
   })
 })
 
