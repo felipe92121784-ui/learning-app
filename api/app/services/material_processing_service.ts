@@ -6,7 +6,9 @@ import { pipeline } from 'node:stream/promises'
 import Material from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
 import ProcessingJob from '#models/processing_job'
-import ImageDerivativeRenderer from '#services/image_derivative_renderer'
+import ImageDerivativeRenderer, {
+  type ImageRenderResult,
+} from '#services/image_derivative_renderer'
 import PdfRenderer, { ProcessingFailure, type RenderedDerivative } from '#services/pdf_renderer'
 import { withPrivateWorkDirectory } from '#services/private_work_directory'
 import type { StorageService } from '#services/storage_service'
@@ -25,7 +27,7 @@ interface PdfRendererLike {
 }
 
 interface ImageRendererLike {
-  render(input: { source: string; outputDirectory: string }): Promise<RenderedDerivative>
+  render(input: { source: string; outputDirectory: string }): Promise<ImageRenderResult>
 }
 
 interface MaterialProcessingServiceOptions {
@@ -149,7 +151,12 @@ export default class MaterialProcessingService {
       return rendered.pages
     }
 
-    return [await this.imageRenderer.render({ source, outputDirectory })]
+    const rendered = await this.imageRenderer.render({ source, outputDirectory })
+    if (rendered.mode === 'TILES') {
+      throw new ProcessingFailure('PROCESSING_FAILED', false)
+    }
+
+    return rendered.artifacts
   }
 
   private async persistSuccessfulRun(

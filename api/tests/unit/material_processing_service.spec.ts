@@ -3,10 +3,8 @@ import CourseModule from '#models/course_module'
 import Material from '#models/material'
 import MaterialDerivative from '#models/material_derivative'
 import ProcessingJob from '#models/processing_job'
-import MaterialProcessingService, {
-  ProcessingFailure,
-  type RenderedDerivative,
-} from '#services/material_processing_service'
+import MaterialProcessingService, { ProcessingFailure } from '#services/material_processing_service'
+import type { ImageRenderResult } from '#services/image_derivative_renderer'
 import ProcessingJobService from '#services/processing_job_service'
 import ProcessingWorker from '#services/processing_worker'
 import MaterialsController from '#controllers/materials_controller'
@@ -46,6 +44,25 @@ test.group('MaterialProcessingService', (group) => {
     assert.isFalse((error as ProcessingFailure).retryable)
     assert.lengthOf(await MaterialDerivative.query(), 0)
     assert.lengthOf(storage.putKeys, 0)
+  })
+
+  test('does not upload tile artifacts until the atomic tile publisher is available', async ({
+    assert,
+  }) => {
+    const { job } = await createRunningJob('IMAGE')
+    const storage = new MemoryStorage({ 'originals/material': Buffer.from('original') })
+    const service = processingService(storage, {
+      pdfRenderer: pdfRenderer(),
+      imageRenderer: tileImageRenderer(),
+    })
+
+    const error = await rejected(() => service.process(job.id, DateTime.utc(), job.claimToken!))
+
+    assert.instanceOf(error, ProcessingFailure)
+    assert.equal((error as ProcessingFailure).code, 'PROCESSING_FAILED')
+    assert.isFalse((error as ProcessingFailure).retryable)
+    assert.lengthOf(storage.putKeys, 0)
+    assert.lengthOf(await MaterialDerivative.query(), 0)
   })
 
   test('deletes uploaded private keys when a later derivative upload fails', async ({ assert }) => {
@@ -476,7 +493,9 @@ function processingService(
   storage: StorageService,
   renderers: {
     pdfRenderer: ReturnType<typeof pdfRenderer>
-    imageRenderer: ReturnType<typeof imageRenderer>
+    imageRenderer: {
+      render(input: { source: string; outputDirectory: string }): Promise<ImageRenderResult>
+    }
   }
 ) {
   return new MaterialProcessingService({
@@ -499,17 +518,36 @@ function imageRenderer(options: { width?: number } = {}) {
     }: {
       source: string
       outputDirectory: string
-    }): Promise<RenderedDerivative> {
+    }): Promise<Extract<ImageRenderResult, { mode: 'PREVIEW' }>> {
       const path = `${outputDirectory}/preview.webp`
       await writeFile(path, 'webp', { mode: 0o600 })
       return {
-        filename: 'preview.webp',
-        path,
-        mimeType: 'image/webp',
-        width: options.width ?? 10,
-        height: 5,
-        pageNumber: null,
-        position: 0,
+        mode: 'PREVIEW',
+        artifacts: [
+          {
+            filename: 'preview.webp',
+            path,
+            mimeType: 'image/webp',
+            width: options.width ?? 10,
+            height: 5,
+            pageNumber: null,
+            position: 0,
+          },
+        ],
+      }
+    },
+  }
+}
+
+function tileImageRenderer(): {
+  render(): Promise<Extract<ImageRenderResult, { mode: 'TILES' }>>
+} {
+  return {
+    async render() {
+      return {
+        mode: 'TILES' as const,
+        manifest: { width: 4097, height: 257, tileSize: 256, minLevel: 0, maxLevel: 13 },
+        artifacts: [],
       }
     },
   }

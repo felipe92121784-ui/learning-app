@@ -44,6 +44,25 @@ export default await Env.create(new URL('../', import.meta.url), {
   S3_BUCKET: Env.schema.string(),
   S3_REGION: Env.schema.string(),
 
+  // Private image pyramid rendering
+  IMAGE_TILE_THRESHOLD_PX: positiveInteger('IMAGE_TILE_THRESHOLD_PX', 4096),
+  IMAGE_TILE_SIZE: positiveInteger('IMAGE_TILE_SIZE', 256),
+
   // Session
   SESSION_DRIVER: Env.schema.enum(['cookie', 'memory', 'database'] as const),
 })
+
+function positiveInteger(name: string, defaultValue: number) {
+  return (key: string, value?: string): number => {
+    if (value === undefined || value === '') {
+      return defaultValue
+    }
+
+    const parsed = Env.schema.number({ message: `${name} must be a positive integer` })(key, value)
+    if (!Number.isSafeInteger(parsed) || parsed < 1) {
+      throw new Error(`${name} must be a positive integer`)
+    }
+
+    return parsed
+  }
+}
