@@ -8,6 +8,7 @@ import ImageTileManifest from '#models/image_tile_manifest'
 import User from '#models/user'
 import AccessLogService from '#services/access_log_service'
 import MinioStorageProvider from '#services/minio_storage_provider'
+import ProtectedWatermarkService from '#services/protected_watermark_service'
 import testUtils from '@adonisjs/core/services/test_utils'
 import type { ApiClient, ApiResponse } from '@japa/api-client'
 import { test } from '@japa/runner'
@@ -31,6 +32,7 @@ test.group('Protected material delivery', (group) => {
   let originalGetObject: MinioStorageProvider['getObject']
   let originalCreateUrl: MinioStorageProvider['createTemporaryDownloadUrl']
   let originalRecord: AccessLogService['record']
+  let originalWatermarkApply: ProtectedWatermarkService['apply']
   let objects: Map<string, Buffer>
   let signedInputs: Array<{ key: string; filename: string; expiresInSeconds: 300 }>
 
@@ -52,6 +54,7 @@ test.group('Protected material delivery', (group) => {
     originalGetObject = MinioStorageProvider.prototype.getObject
     originalCreateUrl = MinioStorageProvider.prototype.createTemporaryDownloadUrl
     originalRecord = AccessLogService.prototype.record
+    originalWatermarkApply = ProtectedWatermarkService.prototype.apply
     objects = new Map()
     signedInputs = []
     MinioStorageProvider.prototype.getObject = async function (key: string) {
@@ -72,6 +75,7 @@ test.group('Protected material delivery', (group) => {
     MinioStorageProvider.prototype.getObject = originalGetObject
     MinioStorageProvider.prototype.createTemporaryDownloadUrl = originalCreateUrl
     AccessLogService.prototype.record = originalRecord
+    ProtectedWatermarkService.prototype.apply = originalWatermarkApply
     await cleanupDatabase()
   })
 
@@ -170,8 +174,10 @@ test.group('Protected material delivery', (group) => {
       maxLevel: 8,
     })
     const tileKey = `${prefix}tiles/8/1/0.webp`
+    const secondTileKey = `${prefix}tiles/8/0/0.webp`
     const source = await webp(1, 256)
     objects.set(tileKey, source)
+    objects.set(secondTileKey, source)
     const viewRule = await allow(student.id, material.id, 'VIEW')
 
     const view = await authenticatedGet(client, `/api/v1/materials/${material.id}/view`, session)
@@ -221,6 +227,14 @@ test.group('Protected material delivery', (group) => {
     assert.isAtLeast(changedChannels, 128)
     assert.lengthOf(await AccessLog.query().where('action', 'VIEW_MATERIAL'), 1)
 
+    const secondTile = await authenticatedGet(
+      client,
+      `/api/v1/materials/${material.id}/tiles/8/0/0`,
+      session
+    )
+    secondTile.assertStatus(200)
+    assert.lengthOf(await AccessLog.query().where('action', 'VIEW_MATERIAL'), 1)
+
     await viewRule.delete()
     const revoked = await authenticatedGet(
       client,
@@ -231,6 +245,33 @@ test.group('Protected material delivery', (group) => {
     assert.notInclude(revoked.text(), tileKey)
     assert.notInclude(revoked.text(), prefix)
     assert.lengthOf(await AccessLog.query().where('action', 'FAILED_ACCESS'), 1)
+  })
+
+  test('returns a generic error without raw bytes when watermark composition fails', async ({
+    assert,
+    client,
+  }) => {
+    session = await login(client, student)
+    const material = await createMaterial(module.id, 'PDF', 'READY')
+    const page = await createDerivative(material.id, 'PDF_PAGE', 'private/no-raw-fallback.webp')
+    const source = await webp(1200, 1600)
+    objects.set(page.storageKey, source)
+    await allow(student.id, material.id, 'VIEW')
+    ProtectedWatermarkService.prototype.apply = async function () {
+      throw new Error('forced watermark failure secret')
+    }
+
+    const response = await authenticatedGet(
+      client,
+      `/api/v1/materials/${material.id}/derivatives/${page.id}`,
+      session
+    )
+
+    response.assertStatus(500)
+    response.assertHeader('content-type', 'application/json; charset=utf-8')
+    assert.equal(response.body().message, 'Unable to deliver protected material')
+    assert.notInclude(response.text(), 'forced watermark failure secret')
+    assert.notInclude(response.text(), source.toString('base64'))
   })
 
   test('keeps VIEW and DOWNLOAD independent, including after VIEW is revoked', async ({

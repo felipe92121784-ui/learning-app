@@ -54,6 +54,19 @@ graph without rewriting it. Vite is pinned to port 5173 and exits instead of
 silently choosing another port when 5173 is occupied; this keeps the dev-server
 origin aligned with the API CORS configuration.
 
+## Protected image viewing
+
+Images up to 4096px use the protected preview path. Images larger than 4096px
+are processed into private 256px tiles and served through the authorized,
+watermarked viewer. After changing the threshold or tile size, reprocess the
+affected materials before testing them; an incomplete run is not published.
+
+The no-credential browser UAT checklist is
+[`web/tests/advanced-protected-viewer.browser.mjs`](web/tests/advanced-protected-viewer.browser.mjs).
+Run it with the API and Web apps active, sign in manually, and inspect the
+browser Network panel for private `no-store` responses without MinIO hosts or
+storage keys.
+
 ## Initial administrator and login
 
 Before running the admin seed command, set the following values in `api/.env`.
