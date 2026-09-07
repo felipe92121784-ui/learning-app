@@ -56,10 +56,25 @@ origin aligned with the API CORS configuration.
 
 ## Protected image viewing
 
-Images up to 4096px use the protected preview path. Images larger than 4096px
-are processed into private 256px tiles and served through the authorized,
-watermarked viewer. After changing the threshold or tile size, reprocess the
-affected materials before testing them; an incomplete run is not published.
+The image pipeline is configured by these API environment variables (the
+`.env.example` values are the defaults):
+
+- `IMAGE_TILE_THRESHOLD_PX=4096`: images whose largest dimension is above this
+  threshold use the tiled path; smaller images use the protected preview path.
+- `IMAGE_TILE_SIZE=256`: edge length, in pixels, for each private tile.
+
+After changing either value, reprocess every affected image before UAT. Upload
+or otherwise enqueue each affected material so it has a pending processing job,
+then run the repository worker command:
+
+```sh
+cd api
+node ace process:material-jobs
+```
+
+Wait until the material reports `READY` and the new tile manifest has the
+expected dimensions/tile size before opening it in the viewer. Processing is
+atomic: an incomplete run remains unavailable and is not published.
 
 The no-credential browser UAT checklist is
 [`web/tests/advanced-protected-viewer.browser.mjs`](web/tests/advanced-protected-viewer.browser.mjs).

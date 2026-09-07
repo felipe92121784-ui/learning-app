@@ -274,6 +274,42 @@ test.group('Protected material delivery', (group) => {
     assert.notInclude(response.text(), source.toString('base64'))
   })
 
+  test('returns a generic error without raw tile bytes when tile watermarking fails', async ({
+    assert,
+    client,
+  }) => {
+    session = await login(client, student)
+    const material = await createMaterial(module.id, 'IMAGE', 'READY')
+    const prefix = `derivatives/${material.id}/watermark-failure/`
+    await ImageTileManifest.create({
+      materialId: material.id,
+      storagePrefix: prefix,
+      width: 1,
+      height: 1,
+      tileSize: 256,
+      minLevel: 0,
+      maxLevel: 0,
+    })
+    const source = await webp(1, 1)
+    objects.set(`${prefix}tiles/0/0/0.webp`, source)
+    await allow(student.id, material.id, 'VIEW')
+    ProtectedWatermarkService.prototype.apply = async function () {
+      throw new Error('forced tile watermark failure secret')
+    }
+
+    const response = await authenticatedGet(
+      client,
+      `/api/v1/materials/${material.id}/tiles/0/0/0`,
+      session
+    )
+
+    response.assertStatus(500)
+    response.assertHeader('content-type', 'application/json; charset=utf-8')
+    assert.equal(response.body().message, 'Unable to deliver protected material')
+    assert.notInclude(response.text(), 'forced tile watermark failure secret')
+    assert.notInclude(response.text(), source.toString('base64'))
+  })
+
   test('keeps VIEW and DOWNLOAD independent, including after VIEW is revoked', async ({
     assert,
     client,
