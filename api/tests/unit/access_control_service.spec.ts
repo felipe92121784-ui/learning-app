@@ -187,6 +187,59 @@ test.group('AccessControlService', (group) => {
     )
   })
 
+  test('caps module and material exceptions by every course enrollment window', async ({
+    assert,
+  }) => {
+    const { student, course, module, material } = await createHierarchy()
+    const access = new AccessControlService()
+    // A VIEW window also caps DOWNLOAD, including ZIP's fallback to VIEW.
+    const enrollment = await AccessRule.create({
+      userId: student.id,
+      resourceType: 'COURSE',
+      resourceId: course.id,
+      capability: 'VIEW',
+      effect: 'DENY',
+      startsAt: now,
+      expiresAt: now.plus({ days: 1 }),
+    })
+    for (const [resourceType, resourceId] of [
+      ['MODULE', module.id],
+      ['MATERIAL', material.id],
+    ] as const) {
+      for (const capability of ['VIEW', 'DOWNLOAD'] as const) {
+        const override = await AccessRule.create({
+          userId: student.id,
+          resourceType,
+          resourceId,
+          capability,
+          effect: 'ALLOW',
+        })
+        for (const [at, allowed] of [
+          [now.minus({ milliseconds: 1 }), false],
+          [now, true],
+          [now.plus({ hours: 12 }), true],
+          [now.plus({ days: 1 }), false],
+        ] as const) {
+          assert.deepEqual(
+            await access.resolve({
+              userId: student.id,
+              resourceType,
+              resourceId,
+              capability,
+              now: at,
+            }),
+            {
+              allowed,
+              decision: allowed ? 'ALLOW' : 'DENY',
+              source: allowed ? resourceType : 'COURSE',
+              ruleId: allowed ? override.id : enrollment.id,
+            }
+          )
+        }
+      }
+    }
+  })
+
   test('rejects nonexistent Course, Module, and Material resources before making a decision', async ({
     assert,
   }) => {

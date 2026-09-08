@@ -25,7 +25,7 @@ import {
 import type { CourseModule } from '@/features/courses/courses-types'
 import { useMaterialsQuery } from '@/features/materials/materials-queries'
 import type { Material } from '@/features/materials/materials-types'
-import { defaultEnrollmentDates, saoPauloDateRangeToUtc } from '@/features/users/enrollment-period'
+import { defaultEnrollmentDates, formatEnrollmentDate, saoPauloDateRangeToUtc, type EnrollmentPeriodInput } from '@/features/users/enrollment-period'
 import { CoursePermissionToggle } from './course-permission-toggle'
 import { coursePermissionRules, type CoursePermission } from './course-permission'
 import {
@@ -232,10 +232,20 @@ function CourseAssociationPermissionControl({
   const queryClient = useQueryClient()
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [editingPeriod, setEditingPeriod] = useState(!association.startsAt || !association.expiresAt)
+  const [pendingPermission, setPendingPermission] = useState(association.permission)
+  const [dates, setDates] = useState(() => {
+    const defaults = defaultEnrollmentDates(new Date())
+    return {
+      startDate: association.startsAt ? formatEnrollmentDate(association.startsAt).split('/').reverse().join('-') : defaults.startDate,
+      endDate: association.expiresAt ? formatEnrollmentDate(association.expiresAt).split('/').reverse().join('-') : defaults.endDate,
+    }
+  })
 
-  async function changePermission(permission: CoursePermission) {
+  async function changePermission(permission: CoursePermission, period?: EnrollmentPeriodInput) {
     setSaveError(null)
     setIsSaving(true)
+    setPendingPermission(permission)
 
     try {
       const latestAssociations = await queryClient.fetchQuery({
@@ -247,16 +257,18 @@ function CourseAssociationPermissionControl({
         await onAssociationMissing()
         return
       }
-      if (!latestAssociation.startsAt || !latestAssociation.expiresAt) {
-        setSaveError('Este curso não possui um período de acesso definido. Atualize a matrícula antes de alterar a permissão.')
+      if (!period && (!latestAssociation.startsAt || !latestAssociation.expiresAt)) {
+        setEditingPeriod(true)
+        setSaveError('Este curso não possui um período de acesso definido. Confirme as datas abaixo para salvar a permissão.')
         return
       }
       await update.mutateAsync({
         userId: studentId,
         courseId: association.id,
         permission,
-        period: { startsAt: latestAssociation.startsAt, expiresAt: latestAssociation.expiresAt },
+        period: period ?? { startsAt: latestAssociation.startsAt!, expiresAt: latestAssociation.expiresAt! },
       })
+      setEditingPeriod(false)
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
         await onAssociationMissing()
@@ -268,6 +280,17 @@ function CourseAssociationPermissionControl({
     }
   }
 
+  function savePeriod() {
+    let period: EnrollmentPeriodInput
+    try {
+      period = saoPauloDateRangeToUtc(dates.startDate, dates.endDate)
+    } catch {
+      setSaveError('Informe datas válidas; o término deve ser igual ou posterior ao início.')
+      return
+    }
+    void changePermission(pendingPermission, period)
+  }
+
   return (
     <div className="space-y-2">
       <CoursePermissionToggle
@@ -275,9 +298,21 @@ function CourseAssociationPermissionControl({
         label={`Permissão para o curso ${association.title}`}
         name={`permission-${studentId}-COURSE-${association.id}`}
         onChange={(permission) => void changePermission(permission)}
-        value={association.permission}
+        value={editingPeriod ? pendingPermission : association.permission}
       />
       <p className="text-xs text-muted-foreground">Regra do curso.</p>
+      {editingPeriod ? (
+        <fieldset className="space-y-3 rounded-md border p-3" disabled={isSaving || update.isPending}>
+          <legend className="text-sm font-medium">Definir período da matrícula</legend>
+          <p className="text-xs text-muted-foreground">Confirme o período antes de salvar. Para datas ausentes, sugerimos hoje e a mesma data no próximo ano. As exceções de módulos e materiais serão preservadas.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="min-w-0 space-y-1 text-sm">Data de início da matrícula<Input type="date" value={dates.startDate} onChange={(event) => setDates({ ...dates, startDate: event.target.value })} /></label>
+            <label className="min-w-0 space-y-1 text-sm">Data de término da matrícula<Input type="date" min={dates.startDate} value={dates.endDate} onChange={(event) => setDates({ ...dates, endDate: event.target.value })} /></label>
+          </div>
+          <p className="text-xs text-muted-foreground">Acesso até o fim da data de término, no horário de São Paulo.</p>
+          <Button type="button" onClick={savePeriod}>Salvar período e permissão</Button>
+        </fieldset>
+      ) : null}
       {saveError ? (
         <Alert variant="destructive">
           <AlertDescription>{saveError}</AlertDescription>
@@ -484,8 +519,10 @@ export function StudentCoursePermissionsDialog({
         next.delete(selectedCourseId)
         return next
       })
-    } catch {
-      setError('Não foi possível atribuir o curso. Tente novamente.')
+    } catch (error) {
+      setError(error instanceof ApiError && error.status === 409
+        ? 'Este curso já foi atribuído ao aluno. A lista foi atualizada.'
+        : 'Não foi possível atribuir o curso. Tente novamente.')
     }
   }
 

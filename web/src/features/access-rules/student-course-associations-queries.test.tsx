@@ -119,6 +119,24 @@ describe('student course association queries', () => {
     ).toBe(true)
   })
 
+  it('refreshes association, access and catalog caches after a creation conflict', async () => {
+    vi.stubEnv('VITE_API_URL', 'https://api.example.test/api/v1')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({}, { status: 409 })))
+    const { queryClient, wrapper } = createHarness()
+    primeAssociatedCaches(queryClient, 12, 7)
+    const { result } = renderHook(() => useCreateStudentCourseAssociationMutation(), { wrapper })
+    await act(async () => {
+      await expect(result.current.mutateAsync({ userId: 12, courseId: 7, permission: 'FULL',
+        period: { startsAt: '2026-09-08T03:00:00.000Z', expiresAt: '2027-09-09T02:59:59.999Z' },
+      })).rejects.toMatchObject({ status: 409 })
+    })
+    for (const queryKey of [studentCourseAssociationsQueryKeys.list(12),
+      accessRulesQueryKeys.direct({ userId: 12, resource: { type: 'COURSE', id: 7 } }),
+      accessRulesQueryKeys.effective({ userId: 12, resource: { type: 'COURSE', id: 7 } }),
+      studentCatalogKeys.courses(), studentCatalogKeys.detail(7),
+    ]) expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true)
+  })
+
   it('invalidates the same associated data after removal', async () => {
     vi.stubEnv('VITE_API_URL', 'https://api.example.test/api/v1')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))

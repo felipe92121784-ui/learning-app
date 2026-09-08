@@ -1,4 +1,5 @@
 import { useId, useState } from 'react'
+import { ApiError } from '@/lib/api-client'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -58,8 +59,10 @@ function AddStudentCourseForm({ onOpenChange, studentId, associations }: Omit<Ad
     try {
       await create.mutateAsync({ userId: studentId, courseId: selectedCourseId, permission, period })
       onOpenChange(false)
-    } catch {
-      setError('Não foi possível atribuir o curso. Tente novamente.')
+    } catch (error) {
+      setError(error instanceof ApiError && error.status === 409
+        ? 'Este curso já foi atribuído ao aluno. A lista foi atualizada.'
+        : 'Não foi possível atribuir o curso. Tente novamente.')
     }
   }
 

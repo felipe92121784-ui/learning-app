@@ -235,13 +235,28 @@ describe('StudentCoursePermissionsDialog', () => {
     }))
   })
 
-  it('does not invent an enrollment period when legacy association dates are missing', async () => {
+  it.each([['Total', 'FULL'], ['Sem acesso', 'NONE']])('requires explicit valid legacy enrollment dates before saving %s', async (label, permission) => {
     associationsState = { ...associationsState, data: [{ ...assignedCourse, startsAt: null, expiresAt: null }] }
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
-    fireEvent.click(screen.getAllByRole('radio', { name: 'Total' })[0]!)
+    fireEvent.click(screen.getAllByRole('radio', { name: label })[0]!)
     expect(await screen.findByText(/Este curso não possui um período de acesso definido/)).toBeTruthy()
     expect(update).not.toHaveBeenCalled()
+    const start = screen.getByLabelText('Data de início da matrícula')
+    const end = screen.getByLabelText('Data de término da matrícula')
+    fireEvent.change(start, { target: { value: '2026-10-01' } })
+    fireEvent.change(end, { target: { value: '2026-09-30' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar período e permissão' }))
+    expect(await screen.findByText('Informe datas válidas; o término deve ser igual ou posterior ao início.')).toBeTruthy()
+    expect(update).not.toHaveBeenCalled()
+    fireEvent.change(end, { target: { value: '2026-10-31' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar período e permissão' }))
+    await waitFor(() => expect(update).toHaveBeenCalledWith({
+      userId: 7, courseId: 9, permission,
+      period: { startsAt: '2026-10-01T03:00:00.000Z', expiresAt: '2026-11-01T02:59:59.999Z' },
+    }))
+    expect(remove).not.toHaveBeenCalled()
+    expect(upsertRule).not.toHaveBeenCalled()
   })
 
   it.each(['PDF', 'IMAGE'])('preserves reading and full access for %s materials', (type) => {

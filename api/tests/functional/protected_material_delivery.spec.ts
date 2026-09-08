@@ -12,6 +12,7 @@ import ProtectedWatermarkService from '#services/protected_watermark_service'
 import testUtils from '@adonisjs/core/services/test_utils'
 import type { ApiClient, ApiResponse } from '@japa/api-client'
 import { test } from '@japa/runner'
+import { DateTime } from 'luxon'
 import { Readable } from 'node:stream'
 import sharp from 'sharp'
 import {
@@ -78,6 +79,113 @@ test.group('Protected material delivery', (group) => {
     ProtectedWatermarkService.prototype.apply = originalWatermarkApply
     await cleanupDatabase()
   })
+
+  for (const scope of ['MODULE', 'MATERIAL'] as const) {
+    test(`enforces enrollment windows for catalog and PDF IMAGE ZIP delivery with ${scope} exceptions`, async ({
+      assert,
+      client,
+    }) => {
+      await Course.query().where('id', module.courseId).update({ status: 'PUBLISHED' })
+      session = await login(client, student)
+      const pdf = await createMaterial(module.id, 'PDF', 'READY')
+      const image = await createMaterial(module.id, 'IMAGE', 'READY')
+      const zip = await createMaterial(module.id, 'ZIP', 'READY')
+      const page = await createDerivative(pdf.id, 'PDF_PAGE', 'enrollment/page.webp')
+      const preview = await createDerivative(image.id, 'IMAGE_PREVIEW', 'enrollment/preview.webp')
+      objects.set(page.storageKey, await webp(1200, 1600))
+      objects.set(preview.storageKey, await webp(1200, 1600))
+      await ImageTileManifest.create({
+        materialId: image.id,
+        storagePrefix: 'enrollment/image/',
+        width: 256,
+        height: 256,
+        tileSize: 256,
+        minLevel: 0,
+        maxLevel: 0,
+      })
+      objects.set('enrollment/image/tiles/0/0/0.webp', await webp(256, 256))
+      for (const resourceId of scope === 'MODULE' ? [module.id] : [pdf.id, image.id, zip.id]) {
+        await AccessRule.create({
+          userId: student.id,
+          resourceType: scope,
+          resourceId,
+          capability: 'VIEW',
+          effect: 'ALLOW',
+        })
+      }
+      // Read-only exceptions retain the ZIP download fallback, but cannot cross the course window.
+      for (const phase of ['scheduled', 'active', 'expired'] as const) {
+        const now = DateTime.utc()
+        const startsAt = phase === 'scheduled' ? now.plus({ days: 1 }) : now.minus({ days: 2 })
+        const expiresAt = phase === 'expired' ? now.minus({ days: 1 }) : now.plus({ days: 2 })
+        for (const capability of ['VIEW', 'DOWNLOAD'] as const) {
+          await AccessRule.updateOrCreate(
+            { userId: student.id, resourceType: 'COURSE', resourceId: module.courseId, capability },
+            { effect: 'DENY', startsAt, expiresAt }
+          )
+        }
+        const active = phase === 'active'
+        const list = await authenticatedGet(client, '/api/v1/student/courses', session)
+        list.assertStatus(200)
+        assert.lengthOf(list.body().data, active ? 1 : 0)
+        const detail = await authenticatedGet(
+          client,
+          `/api/v1/student/courses/${module.courseId}`,
+          session
+        )
+        detail.assertStatus(active ? 200 : 404)
+        for (const material of [pdf, image, zip]) {
+          const view = await authenticatedGet(
+            client,
+            `/api/v1/materials/${material.id}/view`,
+            session
+          )
+          view.assertStatus(active ? 200 : 403)
+          const download = await withCsrf(
+            client.post(`/api/v1/materials/${material.id}/download-url`),
+            session
+          )
+          download.assertStatus(active && material.type === 'ZIP' ? 200 : 403)
+        }
+        for (const path of [
+          `/api/v1/materials/${pdf.id}/derivatives/${page.id}`,
+          `/api/v1/materials/${image.id}/derivatives/${preview.id}`,
+          `/api/v1/materials/${image.id}/tiles/manifest`,
+          `/api/v1/materials/${image.id}/tiles/0/0/0`,
+        ]) {
+          const response = await authenticatedGet(client, path, session)
+          response.assertStatus(active ? 200 : 403)
+        }
+      }
+      assert.lengthOf(signedInputs, 1)
+      for (const resourceId of scope === 'MODULE' ? [module.id] : [pdf.id, image.id, zip.id]) {
+        await AccessRule.create({
+          userId: student.id,
+          resourceType: scope,
+          resourceId,
+          capability: 'DOWNLOAD',
+          effect: 'ALLOW',
+        })
+      }
+      for (const phase of ['scheduled', 'active', 'expired'] as const) {
+        const now = DateTime.utc()
+        await AccessRule.query()
+          .where({ userId: student.id, resourceType: 'COURSE', resourceId: module.courseId })
+          .update({
+            startsAt: phase === 'scheduled' ? now.plus({ days: 1 }) : now.minus({ days: 2 }),
+            expiresAt: phase === 'expired' ? now.minus({ days: 1 }) : now.plus({ days: 2 }),
+          })
+        for (const material of [pdf, image, zip]) {
+          const download = await withCsrf(
+            client.post(`/api/v1/materials/${material.id}/download-url`),
+            session
+          )
+          download.assertStatus(phase === 'active' ? 200 : 403)
+        }
+      }
+      assert.lengthOf(signedInputs, 4)
+    })
+  }
 
   test('requires web authentication for all delivery routes', async ({ client }) => {
     const material = await createMaterial(module.id, 'PDF', 'READY')
@@ -177,7 +285,7 @@ test.group('Protected material delivery', (group) => {
     const secondTileKey = `${prefix}tiles/8/0/0.webp`
     const source = await webp(1, 256)
     objects.set(tileKey, source)
-    objects.set(secondTileKey, source)
+    objects.set(secondTileKey, await webp(256, 256))
     const viewRule = await allow(student.id, material.id, 'VIEW')
 
     const view = await authenticatedGet(client, `/api/v1/materials/${material.id}/view`, session)

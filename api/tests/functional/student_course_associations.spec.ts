@@ -12,6 +12,13 @@ import { csrfSessionFrom, postLogin, withCsrf } from '../helpers/csrf.js'
 
 const password = 'course-association-password-123'
 
+function activePeriod() {
+  return {
+    startsAt: DateTime.utc().minus({ days: 1 }).toISO(),
+    expiresAt: DateTime.utc().plus({ days: 1 }).toISO(),
+  }
+}
+
 async function login(client: ApiClient, user: User) {
   const response = await postLogin(client, { email: user.email, password })
   response.assertStatus(200)
@@ -445,7 +452,122 @@ test.group('Administrative student course associations API', (group) => {
     }
   })
 
-  test('requires an admin and validates student and course targets', async ({ client }) => {
+  test('rejects concurrent duplicate creation without changing the winning enrollment or exceptions', async ({
+    assert,
+    client,
+  }) => {
+    const session = await login(client, admin)
+    const secondAdmin = await User.create({
+      email: 'second-admin@example.test',
+      password,
+      role: 'ADMIN',
+      status: 'ACTIVE',
+    })
+    const secondSession = await login(client, secondAdmin)
+    const { material } = await createMaterial(firstCourse, 'Duplicate course')
+    const exception = await AccessRule.create({
+      userId: student.id,
+      resourceType: 'MATERIAL',
+      resourceId: material.id,
+      capability: 'VIEW',
+      effect: 'DENY',
+    })
+    const inputs = [
+      {
+        permission: 'READ',
+        startsAt: '2026-09-01T03:00:00.000Z',
+        expiresAt: '2026-10-01T03:00:00.000Z',
+      },
+      {
+        permission: 'FULL',
+        startsAt: '2026-09-08T03:00:00.000Z',
+        expiresAt: '2027-09-08T03:00:00.000Z',
+      },
+    ]
+    const responses = await Promise.all(
+      inputs.map((input, index) =>
+        withCsrf(
+          client.post(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
+          index === 0 ? session : secondSession
+        ).unsafeJson(input)
+      )
+    )
+    assert.deepEqual(responses.map((response) => response.status()).sort(), [200, 409])
+    const winningIndex = responses.findIndex((response) => response.status() === 200)
+    assert.equal(responses[1 - winningIndex].body().code, 'COURSE_ASSOCIATION_ALREADY_EXISTS')
+    const rules = await AccessRule.query().where({
+      userId: student.id,
+      resourceType: 'COURSE',
+      resourceId: firstCourse.id,
+    })
+    assert.lengthOf(rules, 2)
+    for (const rule of rules) {
+      assert.equal(rule.startsAt?.toUTC().toISO(), inputs[winningIndex].startsAt)
+      assert.equal(rule.expiresAt?.toUTC().toISO(), inputs[winningIndex].expiresAt)
+      assert.equal(
+        rule.effect,
+        rule.capability === 'VIEW' || inputs[winningIndex].permission === 'FULL' ? 'ALLOW' : 'DENY'
+      )
+    }
+    assert.exists(await AccessRule.find(exception.id))
+  })
+
+  test('defines a legacy enrollment period and permission without replacing child exceptions', async ({
+    assert,
+    client,
+  }) => {
+    const { module, material } = await createMaterial(firstCourse, 'Legacy course')
+    const rules = await AccessRule.createMany([
+      {
+        userId: student.id,
+        resourceType: 'COURSE',
+        resourceId: firstCourse.id,
+        capability: 'VIEW',
+        effect: 'ALLOW',
+      },
+      {
+        userId: student.id,
+        resourceType: 'MODULE',
+        resourceId: module.id,
+        capability: 'VIEW',
+        effect: 'DENY',
+      },
+      {
+        userId: student.id,
+        resourceType: 'MATERIAL',
+        resourceId: material.id,
+        capability: 'DOWNLOAD',
+        effect: 'ALLOW',
+      },
+    ])
+    const exceptions = await Promise.all(
+      rules.slice(1).map(async (rule) => {
+        await rule.refresh()
+        return rule.serialize()
+      })
+    )
+    const period = activePeriod()
+    const session = await login(client, admin)
+    const response = await withCsrf(
+      client.put(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
+      session
+    ).unsafeJson({ permission: 'NONE', ...period })
+    response.assertStatus(200)
+    response.assertBodyContains({ data: { permission: 'NONE', ...period } })
+    for (const [index, rule] of rules.slice(1).entries()) {
+      const stored = await AccessRule.findOrFail(rule.id)
+      assert.deepEqual(stored.serialize(), exceptions[index])
+    }
+    const courseRules = await AccessRule.query().where({
+      userId: student.id,
+      resourceType: 'COURSE',
+      resourceId: firstCourse.id,
+    })
+    assert.lengthOf(courseRules, 2)
+    assert.isTrue(courseRules.every((rule) => rule.effect === 'DENY'))
+  })
+
+  test('requires an admin and validates student and course targets', async ({ assert, client }) => {
     const studentSession = await login(client, student)
     const adminSession = await login(client, admin)
 
@@ -467,11 +589,15 @@ test.group('Administrative student course associations API', (group) => {
     const unknownCourse = await withCsrf(
       client.put(`/api/v1/users/${student.id}/courses/999999`),
       adminSession
-    ).unsafeJson({ permission: 'READ' })
+    ).unsafeJson({ permission: 'READ', ...activePeriod() })
     const invalidPermission = await withCsrf(
       client.put(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
       adminSession
-    ).unsafeJson({ permission: 'EDIT' })
+    ).unsafeJson({ permission: 'EDIT', ...activePeriod() })
+    const missingPeriod = await withCsrf(
+      client.post(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
+      adminSession
+    ).unsafeJson({ permission: 'READ' })
     const invalidWindow = await withCsrf(
       client.post(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
       adminSession
@@ -496,6 +622,16 @@ test.group('Administrative student course associations API', (group) => {
     unknownStudent.assertStatus(422)
     unknownCourse.assertStatus(422)
     invalidPermission.assertStatus(422)
+    assert.equal(unknownCourse.body().errors[0].field, 'courseId')
+    assert.equal(invalidPermission.body().errors[0].field, 'permission')
+    missingPeriod.assertStatus(422)
+    assert.deepEqual(
+      missingPeriod
+        .body()
+        .errors.map((error: { field: string }) => error.field)
+        .sort(),
+      ['expiresAt', 'startsAt']
+    )
     invalidWindow.assertStatus(422)
     nonUtcWindow.assertStatus(422)
   })

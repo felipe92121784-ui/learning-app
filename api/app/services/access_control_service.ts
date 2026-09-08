@@ -43,16 +43,31 @@ interface ResourceInChain {
 export default class AccessControlService {
   async resolve(input: ResolveAccessInput): Promise<AccessDecision> {
     const chain = await this.resourceChain(input.resourceType, input.resourceId)
+    const course = chain.find((resource) => resource.type === 'COURSE')!
+    const courseRules = await AccessRule.query().where({
+      userId: input.userId,
+      resourceType: 'COURSE',
+      resourceId: course.id,
+    })
+    // Enrollment dates cap every capability before child overrides are considered.
+    // Undated legacy rules and standalone child grants keep their existing semantics.
+    const outsideEnrollment = courseRules.find((rule) => !this.isValidAt(rule, input.now))
+    if (outsideEnrollment) {
+      return { allowed: false, decision: 'DENY', source: 'COURSE', ruleId: outsideEnrollment.id }
+    }
 
     for (const resource of chain) {
-      const rule = await AccessRule.query()
-        .where({
-          userId: input.userId,
-          resourceType: resource.type,
-          resourceId: resource.id,
-          capability: input.capability,
-        })
-        .first()
+      const rule =
+        resource.type === 'COURSE'
+          ? courseRules.find((candidate) => candidate.capability === input.capability)
+          : await AccessRule.query()
+              .where({
+                userId: input.userId,
+                resourceType: resource.type,
+                resourceId: resource.id,
+                capability: input.capability,
+              })
+              .first()
 
       if (!rule || !this.isValidAt(rule, input.now) || rule.effect === 'INHERIT') {
         continue

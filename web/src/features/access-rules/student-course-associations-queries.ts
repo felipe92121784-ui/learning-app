@@ -6,6 +6,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query'
 import { studentCatalogKeys } from '@/features/student-catalog/student-catalog-queries'
+import { ApiError } from '@/lib/api-client'
 import type { EnrollmentPeriodInput } from '@/features/users/enrollment-period'
 import { accessRulesQueryKeys } from './access-rules-queries'
 import {
@@ -66,6 +67,11 @@ export function useCreateStudentCourseAssociationMutation() {
   return useMutation({
     mutationFn: ({ userId, courseId, permission, period }: CreateStudentCourseAssociationVariables) =>
       createStudentCourseAssociation(userId, courseId, permission, period),
+    onError: async (error, { userId }) => {
+      if (error instanceof ApiError && error.status === 409) {
+        await refreshAssociatedCourseData(queryClient, userId)
+      }
+    },
     onSuccess: async (_association, { userId }) => {
       await refreshAssociatedCourseData(queryClient, userId)
     },

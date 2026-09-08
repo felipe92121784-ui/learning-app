@@ -2,6 +2,7 @@ import Course from '#models/course'
 import User from '#models/user'
 import StudentCourseAssociationService, {
   StudentCourseAssociationNotFoundError,
+  StudentCourseAssociationAlreadyExistsError,
 } from '#services/student_course_association_service'
 import StudentCourseAssociationTransformer from '#transformers/student_course_association_transformer'
 import { fieldError } from '#validators/access_rule'
@@ -24,7 +25,7 @@ export default class StudentCourseAssociationsController {
     return serialize(StudentCourseAssociationTransformer.transform(associations))
   }
 
-  async create({ params, request, serialize }: HttpContext) {
+  async create({ params, request, response, serialize }: HttpContext) {
     const target = await studentCourseAssociationTargetValidator.validate(params)
     const { permission, startsAt, expiresAt } = await request.validateUsing(
       updateStudentCourseAssociationValidator
@@ -32,14 +33,23 @@ export default class StudentCourseAssociationsController {
     const period = parseStudentCourseAssociationPeriod(startsAt, expiresAt)
     await this.ensureStudent(target.userId)
     await this.ensureCourse(target.courseId)
-    const association = await this.associations.create(
-      target.userId,
-      target.courseId,
-      permission,
-      period
-    )
-
-    return serialize(StudentCourseAssociationTransformer.transform(association))
+    try {
+      const association = await this.associations.create(
+        target.userId,
+        target.courseId,
+        permission,
+        period
+      )
+      return serialize(StudentCourseAssociationTransformer.transform(association))
+    } catch (error) {
+      if (error instanceof StudentCourseAssociationAlreadyExistsError) {
+        return response.conflict({
+          message: error.message,
+          code: 'COURSE_ASSOCIATION_ALREADY_EXISTS',
+        })
+      }
+      throw error
+    }
   }
 
   async update({ params, request, response, serialize }: HttpContext) {

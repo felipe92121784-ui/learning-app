@@ -29,6 +29,13 @@ export class StudentCourseAssociationNotFoundError extends Error {
   }
 }
 
+export class StudentCourseAssociationAlreadyExistsError extends Error {
+  constructor() {
+    super('The course is already assigned to this student')
+    this.name = 'StudentCourseAssociationAlreadyExistsError'
+  }
+}
+
 export default class StudentCourseAssociationService {
   async list(userId: number): Promise<StudentCourseAssociation[]> {
     const courses = await Course.query()
@@ -71,7 +78,13 @@ export default class StudentCourseAssociationService {
   ): Promise<StudentCourseAssociation> {
     const course = await db.transaction(async (trx) => {
       const lockedCourse = await lockCourse(courseId, trx)
-      await writePermission(trx, userId, lockedCourse.id, permission, period)
+      const existing = await AccessRule.query({ client: trx })
+        .where({ userId, resourceType: 'COURSE', resourceId: lockedCourse.id })
+        .first()
+      if (existing) {
+        throw new StudentCourseAssociationAlreadyExistsError()
+      }
+      await writePermission(trx, userId, lockedCourse.id, permission, period, false)
       return lockedCourse
     })
 
@@ -94,7 +107,7 @@ export default class StudentCourseAssociationService {
         throw new StudentCourseAssociationNotFoundError()
       }
 
-      await writePermission(trx, userId, lockedCourse.id, permission, period)
+      await writePermission(trx, userId, lockedCourse.id, permission, period, true)
       return lockedCourse
     })
 
@@ -177,19 +190,32 @@ async function writePermission(
   userId: number,
   courseId: number,
   permission: CoursePermission,
-  period: StudentCourseAssociationPeriod
+  period: StudentCourseAssociationPeriod,
+  replaceExisting: boolean
 ) {
   const effects = effectsFor(permission)
   const now = new Date()
 
-  await trx
+  const insert = trx
     .table('access_rules')
     .insert([
       courseRule(userId, courseId, 'VIEW', effects.view, now, period),
       courseRule(userId, courseId, 'DOWNLOAD', effects.download, now, period),
     ])
-    .onConflict(['user_id', 'resource_type', 'resource_id', 'capability'])
-    .merge(['effect', 'starts_at', 'expires_at', 'updated_at'])
+  if (replaceExisting) {
+    await insert
+      .onConflict(['user_id', 'resource_type', 'resource_id', 'capability'])
+      .merge(['effect', 'starts_at', 'expires_at', 'updated_at'])
+    return
+  }
+  try {
+    await insert
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
+      throw new StudentCourseAssociationAlreadyExistsError()
+    }
+    throw error
+  }
 }
 
 function courseRule(

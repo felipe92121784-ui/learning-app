@@ -11,6 +11,7 @@ import type { ManagedUser } from './users-types'
 import { StudentProfileCard } from './student-profile-card'
 import { StudentCourseCards } from './student-course-cards'
 import { AddStudentCourseDialog } from './add-student-course-dialog'
+import { ApiError } from '@/lib/api-client'
 
 vi.mock('@/features/courses/courses-api', () => ({ listCourses: vi.fn(), getCourse: vi.fn() }))
 vi.mock('@/features/access-rules/student-course-associations-api', () => ({
@@ -119,6 +120,15 @@ describe('student course details', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Adicionar curso' }))
     expect(screen.getByRole('alert').textContent).toContain('A data de término não pode ser anterior à data de início.')
     expect(createStudentCourseAssociation).not.toHaveBeenCalled()
+  })
+
+  it('explains a duplicate enrollment conflict and keeps the form open', async () => {
+    vi.mocked(createStudentCourseAssociation).mockRejectedValue(new ApiError(409))
+    const onOpenChange = renderAdd()
+    fireEvent.click(await screen.findByRole('radio', { name: 'Segurança' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar curso' }))
+    expect(await screen.findByText('Este curso já foi atribuído ao aluno. A lista foi atualizada.')).toBeTruthy()
+    expect(onOpenChange).not.toHaveBeenCalled()
   })
 
   it('keeps the form open with an actionable error after a failed assignment', async () => {
