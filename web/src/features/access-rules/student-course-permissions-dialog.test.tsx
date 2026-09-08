@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ApiError } from '@/lib/api-client'
@@ -29,6 +29,7 @@ let associationsState: {
 }
 let associationResponses: typeof associationsState[]
 let courseState: { data: { modules: unknown[] } | undefined; isPending: boolean; isError?: boolean }
+let materialsState: { data: unknown[]; isPending: boolean; isError?: boolean }
 let directRulesState: { data: unknown[] | undefined; isPending: boolean; isError: boolean }
 let effectiveAccessState: { data: unknown; isPending: boolean; isError: boolean }
 
@@ -41,6 +42,7 @@ function resetStates() {
   }
   associationResponses = []
   courseState = { data: { modules: [] }, isPending: false }
+  materialsState = { data: [], isPending: false }
   directRulesState = { data: [], isPending: false, isError: false }
   effectiveAccessState = {
     data: {
@@ -95,7 +97,7 @@ vi.mock('@/features/courses/courses-queries', () => ({
 }))
 
 vi.mock('@/features/materials/materials-queries', () => ({
-  useMaterialsQuery: () => ({ data: [], isPending: false }),
+  useMaterialsQuery: () => materialsState,
 }))
 
 vi.mock('./access-rules-queries', () => ({
@@ -210,6 +212,30 @@ describe('StudentCoursePermissionsDialog', () => {
 
     fireEvent.click(moduleTrigger)
     expect(moduleTrigger.getAttribute('data-state')).toBe('open')
+  })
+
+  it('shows ZIP materials as a download-only permission', () => {
+    courseState = {
+      data: { modules: [{ id: 31, title: 'Módulo 1', description: null }] },
+      isPending: false,
+    }
+    materialsState = {
+      data: [{
+        id: 41,
+        title: 'Pacote de exercícios',
+        originalFilename: 'exercicios.zip',
+        type: 'ZIP',
+      }],
+      isPending: false,
+    }
+
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+    fireEvent.click(screen.getByRole('button', { name: /Módulo: Módulo 1/ }))
+
+    const zipPermission = screen.getByRole('group', { name: 'Permissão para material 41' })
+    expect(within(zipPermission).getByRole('radio', { name: 'Download' })).toBeTruthy()
+    expect(within(zipPermission).queryByRole('radio', { name: 'Leitura' })).toBeNull()
   })
 
   it('closes stale course configuration instead of reassigning a course removed by another admin', async () => {

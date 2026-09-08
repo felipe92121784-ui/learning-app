@@ -381,6 +381,13 @@ test.group('Protected material delivery', (group) => {
     const zipView = await authenticatedGet(client, `/api/v1/materials/${zip.id}/view`, session)
     zipView.assertStatus(200)
     assert.isNull(zipView.body().data.viewer)
+    assert.isTrue(zipView.body().data.download.allowed)
+
+    const zipDownload = await withCsrf(
+      client.post(`/api/v1/materials/${zip.id}/download-url`),
+      session
+    )
+    zipDownload.assertStatus(200)
 
     const processingView = await authenticatedGet(
       client,

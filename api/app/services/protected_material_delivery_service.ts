@@ -139,14 +139,19 @@ export default class ProtectedMaterialDeliveryService {
 
   async getView(input: MaterialRequest): Promise<ProtectedMaterialView> {
     const material = await this.findMaterial(input.materialId)
-    await this.requireCapability(material, input, 'VIEW')
+    const view = await this.resolve(material.id, input.userId, 'VIEW')
+    if (!view.allowed) {
+      await this.record(input, 'FAILED_ACCESS')
+      throw new ProtectedMaterialForbiddenError()
+    }
 
     if (material.processingStatus !== 'READY') {
       throw new ProtectedMaterialUnavailableError('MATERIAL_NOT_READY')
     }
 
     const viewer = await this.buildViewer(material)
-    const download = await this.resolve(material.id, input.userId, 'DOWNLOAD')
+    const download =
+      material.type === 'ZIP' ? view : await this.resolve(material.id, input.userId, 'DOWNLOAD')
 
     await this.record(input, 'VIEW_MATERIAL')
 
@@ -207,8 +212,12 @@ export default class ProtectedMaterialDeliveryService {
     const material = await this.findMaterial(input.materialId)
     const decisionTime = this.now()
     const decision = await this.resolve(material.id, input.userId, 'DOWNLOAD', decisionTime)
+    const zipViewDecision =
+      material.type === 'ZIP' && !decision.allowed
+        ? await this.resolve(material.id, input.userId, 'VIEW', decisionTime)
+        : null
 
-    if (!decision.allowed) {
+    if (!decision.allowed && !zipViewDecision?.allowed) {
       await this.record(input, 'FAILED_ACCESS')
       throw new ProtectedMaterialForbiddenError()
     }

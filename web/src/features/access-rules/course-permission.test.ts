@@ -44,4 +44,14 @@ describe('CoursePermissionToggle', () => {
 
     expect(onChange).toHaveBeenCalledWith('FULL')
   })
+
+  it('fills the entire option cell when an option is selected', () => {
+    render(createElement(CoursePermissionToggle, {
+      label: 'Permissão do curso',
+      onChange: vi.fn(),
+      value: 'READ',
+    }))
+
+    expect(screen.getByText('Leitura').className).toContain('w-full')
+  })
 })

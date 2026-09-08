@@ -79,6 +79,7 @@ function isDirectOverride(effect: AccessEffect | undefined) {
 function permissionFromDirectAndEffective(
   direct: Partial<Record<'VIEW' | 'DOWNLOAD', AccessEffect>>,
   effective: EffectiveAccess,
+  downloadOnly = false,
 ): CoursePermission {
   const view = isDirectOverride(direct.VIEW)
     ? direct.VIEW === 'ALLOW'
@@ -87,7 +88,7 @@ function permissionFromDirectAndEffective(
     ? direct.DOWNLOAD === 'ALLOW'
     : effective.download.allowed
 
-  return permissionFromEffects(view, download)
+  return downloadOnly ? (view || download ? 'FULL' : 'NONE') : permissionFromEffects(view, download)
 }
 
 function inheritedLabel(access: EffectiveAccess | null | undefined): string {
@@ -102,11 +103,13 @@ function ResourcePermissionControl({
   resource,
   studentId,
   courseId,
+  materialType,
   onAssociationMissing,
 }: {
   resource: AccessResource
   studentId: number
   courseId: number
+  materialType?: Material['type']
   onAssociationMissing: () => void | Promise<void>
 }) {
   const target = { userId: studentId, resource }
@@ -130,7 +133,7 @@ function ResourcePermissionControl({
     courseIsMissing
   const value =
     !hasQueryError && effectiveAccess.data
-      ? permissionFromDirectAndEffective(direct, effectiveAccess.data)
+      ? permissionFromDirectAndEffective(direct, effectiveAccess.data, materialType === 'ZIP')
       : null
 
   async function changePermission(permission: CoursePermission) {
@@ -180,6 +183,8 @@ function ResourcePermissionControl({
         label={`Permissão para ${resource.type.toLowerCase()} ${resource.id}`}
         name={`permission-${studentId}-${resource.type}-${resource.id}`}
         onChange={(permission) => void changePermission(permission)}
+        options={materialType === 'ZIP' ? ['NONE', 'FULL'] : undefined}
+        labels={materialType === 'ZIP' ? { FULL: 'Download' } : undefined}
         value={value}
       />
       {hasQueryError ? (
@@ -198,7 +203,9 @@ function ResourcePermissionControl({
             ? overrideCount === 1
               ? 'Exceção direta parcial neste item.'
               : 'Exceção direta neste item.'
-            : inheritedLabel(effectiveAccess.data)}
+            : materialType === 'ZIP'
+              ? `${inheritedLabel(effectiveAccess.data)} — ZIP disponível para download.`
+              : inheritedLabel(effectiveAccess.data)}
         </p>
       )}
       {saveError ? (
@@ -293,6 +300,7 @@ function MaterialPermissionRow({
         resource={{ type: 'MATERIAL', id: material.id }}
         studentId={studentId}
         courseId={courseId}
+        materialType={material.type}
         onAssociationMissing={onAssociationMissing}
       />
     </li>
