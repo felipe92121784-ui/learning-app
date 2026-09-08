@@ -1,6 +1,8 @@
 import Course from '#models/course'
 import User from '#models/user'
-import StudentCourseAssociationService from '#services/student_course_association_service'
+import StudentCourseAssociationService, {
+  StudentCourseAssociationNotFoundError,
+} from '#services/student_course_association_service'
 import StudentCourseAssociationTransformer from '#transformers/student_course_association_transformer'
 import { fieldError } from '#validators/access_rule'
 import {
@@ -21,18 +23,32 @@ export default class StudentCourseAssociationsController {
     return serialize(StudentCourseAssociationTransformer.transform(associations))
   }
 
-  async upsert({ params, request, serialize }: HttpContext) {
+  async create({ params, request, serialize }: HttpContext) {
     const target = await studentCourseAssociationTargetValidator.validate(params)
     const { permission } = await request.validateUsing(updateStudentCourseAssociationValidator)
     await this.ensureStudent(target.userId)
     await this.ensureCourse(target.courseId)
-    const association = await this.associations.setPermission(
-      target.userId,
-      target.courseId,
-      permission
-    )
+    const association = await this.associations.create(target.userId, target.courseId, permission)
 
     return serialize(StudentCourseAssociationTransformer.transform(association))
+  }
+
+  async update({ params, request, response, serialize }: HttpContext) {
+    const target = await studentCourseAssociationTargetValidator.validate(params)
+    const { permission } = await request.validateUsing(updateStudentCourseAssociationValidator)
+    await this.ensureStudent(target.userId)
+    await this.ensureCourse(target.courseId)
+
+    try {
+      const association = await this.associations.update(target.userId, target.courseId, permission)
+      return serialize(StudentCourseAssociationTransformer.transform(association))
+    } catch (error) {
+      if (error instanceof StudentCourseAssociationNotFoundError) {
+        return response.conflict({ message: error.message, code: 'COURSE_ASSOCIATION_NOT_FOUND' })
+      }
+
+      throw error
+    }
   }
 
   async destroy({ params, response }: HttpContext) {

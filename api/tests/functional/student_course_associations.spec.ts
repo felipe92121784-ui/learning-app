@@ -7,6 +7,7 @@ import testUtils from '@adonisjs/core/services/test_utils'
 import db from '@adonisjs/lucid/services/db'
 import { test } from '@japa/runner'
 import type { ApiClient } from '@japa/api-client'
+import { DateTime } from 'luxon'
 import { csrfSessionFrom, postLogin, withCsrf } from '../helpers/csrf.js'
 
 const password = 'course-association-password-123'
@@ -118,19 +119,19 @@ test.group('Administrative student course associations API', (group) => {
     ])
   })
 
-  test('creates and updates a course association as paired direct permission rules', async ({
+  test('creates a course association explicitly and updates its paired direct permission rules', async ({
     assert,
     client,
   }) => {
     const session = await login(client, admin)
 
-    for (const [permission, view, download] of [
-      ['NONE', 'DENY', 'DENY'],
-      ['READ', 'ALLOW', 'DENY'],
-      ['FULL', 'ALLOW', 'ALLOW'],
+    for (const [method, permission, view, download] of [
+      ['post', 'NONE', 'DENY', 'DENY'],
+      ['put', 'READ', 'ALLOW', 'DENY'],
+      ['put', 'FULL', 'ALLOW', 'ALLOW'],
     ] as const) {
       const response = await withCsrf(
-        client.put(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
+        client[method](`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
         session
       ).unsafeJson({ permission })
 
@@ -149,6 +150,71 @@ test.group('Administrative student course associations API', (group) => {
         ]
       )
     }
+  })
+
+  test('does not recreate an association when an update follows its removal', async ({
+    assert,
+    client,
+  }) => {
+    const session = await login(client, admin)
+    const create = await withCsrf(
+      client.post(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
+      session
+    ).unsafeJson({ permission: 'READ' })
+    create.assertStatus(200)
+
+    const remove = await withCsrf(
+      client.delete(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
+      session
+    )
+    remove.assertStatus(204)
+
+    const update = await withCsrf(
+      client.put(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
+      session
+    ).unsafeJson({ permission: 'FULL' })
+
+    update.assertStatus(409)
+    assert.lengthOf(
+      await AccessRule.query().where({
+        userId: student.id,
+        resourceType: 'COURSE',
+        resourceId: firstCourse.id,
+      }),
+      0
+    )
+  })
+
+  test('keeps temporal course rules from determining the current association permission', async ({
+    assert,
+    client,
+  }) => {
+    await AccessRule.createMany([
+      {
+        userId: student.id,
+        resourceType: 'COURSE',
+        resourceId: firstCourse.id,
+        capability: 'VIEW',
+        effect: 'ALLOW',
+        startsAt: DateTime.utc().plus({ hours: 1 }),
+      },
+      {
+        userId: student.id,
+        resourceType: 'COURSE',
+        resourceId: firstCourse.id,
+        capability: 'DOWNLOAD',
+        effect: 'ALLOW',
+        expiresAt: DateTime.utc().minus({ minutes: 1 }),
+      },
+    ])
+    const session = await login(client, admin)
+
+    const response = await client
+      .get(`/api/v1/users/${student.id}/courses`)
+      .cookie(session.name, session.value)
+
+    response.assertStatus(200)
+    assert.equal(response.body().data[0].permission, 'NONE')
   })
 
   test('removes direct rules inside the selected course while preserving unrelated rules', async ({

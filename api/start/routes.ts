@@ -42,9 +42,13 @@ router
         router.patch('users/:id', [controllers.Users, 'update'])
         router.patch('users/:id/status', [controllers.Users, 'updateStatus'])
         router.get('users/:userId/courses', [controllers.StudentCourseAssociations, 'index'])
+        router.post('users/:userId/courses/:courseId', [
+          controllers.StudentCourseAssociations,
+          'create',
+        ])
         router.put('users/:userId/courses/:courseId', [
           controllers.StudentCourseAssociations,
-          'upsert',
+          'update',
         ])
         router.delete('users/:userId/courses/:courseId', [
           controllers.StudentCourseAssociations,

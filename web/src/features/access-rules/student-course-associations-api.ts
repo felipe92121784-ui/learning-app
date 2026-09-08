@@ -39,6 +39,23 @@ export async function updateStudentCourseAssociation(
   )
 }
 
+export async function createStudentCourseAssociation(
+  userId: number,
+  courseId: number,
+  permission: CoursePermission,
+): Promise<StudentCourseAssociation> {
+  return requireData(
+    await apiClient<ApiEnvelope<StudentCourseAssociation>>(
+      `/users/${userId}/courses/${courseId}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permission }),
+      },
+    ),
+  )
+}
+
 export async function deleteStudentCourseAssociation(
   userId: number,
   courseId: number,

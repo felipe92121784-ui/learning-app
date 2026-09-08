@@ -2,6 +2,7 @@ import AccessRule, { type AccessEffect } from '#models/access_rule'
 import Course from '#models/course'
 import db from '@adonisjs/lucid/services/db'
 import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
+import { DateTime } from 'luxon'
 
 export const COURSE_PERMISSIONS = ['NONE', 'READ', 'FULL'] as const
 export type CoursePermission = (typeof COURSE_PERMISSIONS)[number]
@@ -9,6 +10,13 @@ export type CoursePermission = (typeof COURSE_PERMISSIONS)[number]
 export interface StudentCourseAssociation {
   course: Course
   permission: CoursePermission
+}
+
+export class StudentCourseAssociationNotFoundError extends Error {
+  constructor() {
+    super('The course is no longer assigned to this student')
+    this.name = 'StudentCourseAssociationNotFoundError'
+  }
 }
 
 export default class StudentCourseAssociationService {
@@ -39,31 +47,43 @@ export default class StudentCourseAssociationService {
       rulesByCourse.set(rule.resourceId, [...(rulesByCourse.get(rule.resourceId) ?? []), rule])
     }
 
+    const now = DateTime.utc()
     return courses.map((course) => ({
       course,
-      permission: permissionFromRules(rulesByCourse.get(course.id) ?? []),
+      permission: permissionFromRules(rulesByCourse.get(course.id) ?? [], now),
     }))
   }
 
-  async setPermission(
+  async create(
     userId: number,
     courseId: number,
     permission: CoursePermission
   ): Promise<StudentCourseAssociation> {
-    const effects = effectsFor(permission)
     const course = await db.transaction(async (trx) => {
       const lockedCourse = await lockCourse(courseId, trx)
-      const now = new Date()
+      await writePermission(trx, userId, lockedCourse.id, permission)
+      return lockedCourse
+    })
 
-      await trx
-        .table('access_rules')
-        .insert([
-          courseRule(userId, lockedCourse.id, 'VIEW', effects.view, now),
-          courseRule(userId, lockedCourse.id, 'DOWNLOAD', effects.download, now),
-        ])
-        .onConflict(['user_id', 'resource_type', 'resource_id', 'capability'])
-        .merge(['effect', 'starts_at', 'expires_at', 'updated_at'])
+    return { course, permission }
+  }
 
+  async update(
+    userId: number,
+    courseId: number,
+    permission: CoursePermission
+  ): Promise<StudentCourseAssociation> {
+    const course = await db.transaction(async (trx) => {
+      const lockedCourse = await lockCourse(courseId, trx)
+      const association = await AccessRule.query({ client: trx })
+        .where({ userId, resourceType: 'COURSE', resourceId: lockedCourse.id })
+        .first()
+
+      if (!association) {
+        throw new StudentCourseAssociationNotFoundError()
+      }
+
+      await writePermission(trx, userId, lockedCourse.id, permission)
       return lockedCourse
     })
 
@@ -107,9 +127,14 @@ function effectsFor(permission: CoursePermission): { view: AccessEffect; downloa
   }
 }
 
-function permissionFromRules(rules: AccessRule[]): CoursePermission {
-  const view = rules.find((rule) => rule.capability === 'VIEW')?.effect
-  const download = rules.find((rule) => rule.capability === 'DOWNLOAD')?.effect
+function permissionFromRules(rules: AccessRule[], now: DateTime): CoursePermission {
+  const activeRules = rules.filter(
+    (rule) =>
+      (!rule.startsAt || rule.startsAt.toMillis() <= now.toMillis()) &&
+      (!rule.expiresAt || now.toMillis() < rule.expiresAt.toMillis())
+  )
+  const view = activeRules.find((rule) => rule.capability === 'VIEW')?.effect
+  const download = activeRules.find((rule) => rule.capability === 'DOWNLOAD')?.effect
 
   if (view === 'ALLOW' && download === 'ALLOW') {
     return 'FULL'
@@ -118,6 +143,25 @@ function permissionFromRules(rules: AccessRule[]): CoursePermission {
     return 'READ'
   }
   return 'NONE'
+}
+
+async function writePermission(
+  trx: TransactionClientContract,
+  userId: number,
+  courseId: number,
+  permission: CoursePermission
+) {
+  const effects = effectsFor(permission)
+  const now = new Date()
+
+  await trx
+    .table('access_rules')
+    .insert([
+      courseRule(userId, courseId, 'VIEW', effects.view, now),
+      courseRule(userId, courseId, 'DOWNLOAD', effects.download, now),
+    ])
+    .onConflict(['user_id', 'resource_type', 'resource_id', 'capability'])
+    .merge(['effect', 'starts_at', 'expires_at', 'updated_at'])
 }
 
 function courseRule(

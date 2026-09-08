@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { ApiError } from '@/lib/api-client'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -34,6 +35,7 @@ import type {
 } from './access-rules-types'
 import {
   useDeleteStudentCourseAssociationMutation,
+  useCreateStudentCourseAssociationMutation,
   useStudentCourseAssociationsQuery,
   useUpdateStudentCourseAssociationMutation,
   studentCourseAssociationsQueryOptions,
@@ -233,7 +235,11 @@ function CourseAssociationPermissionControl({
         courseId: association.id,
         permission,
       })
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        onAssociationMissing()
+        return
+      }
       setSaveError('Não foi possível salvar a permissão do curso. Tente novamente.')
     } finally {
       setIsSaving(false)
@@ -398,7 +404,7 @@ export function StudentCoursePermissionsDialog({
 }: StudentCoursePermissionsDialogProps) {
   const associations = useStudentCourseAssociationsQuery(student.id)
   const courses = useCoursesQuery()
-  const updateAssociation = useUpdateStudentCourseAssociationMutation()
+  const createAssociation = useCreateStudentCourseAssociationMutation()
   const deleteAssociation = useDeleteStudentCourseAssociationMutation()
   const [selectionOpen, setSelectionOpen] = useState(false)
   const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null)
@@ -428,7 +434,7 @@ export function StudentCoursePermissionsDialog({
     setError(null)
 
     try {
-      await updateAssociation.mutateAsync({
+      await createAssociation.mutateAsync({
         userId: student.id,
         courseId: selectedCourseId,
         permission: newPermission,
@@ -522,11 +528,11 @@ export function StudentCoursePermissionsDialog({
               value={newPermission}
             />
             <Button
-              disabled={!associationsReady || !selectedCourseId || updateAssociation.isPending}
+              disabled={!associationsReady || !selectedCourseId || createAssociation.isPending}
               onClick={() => void addCourse()}
               type="button"
             >
-              {updateAssociation.isPending ? 'Adicionando…' : 'Adicionar curso'}
+              {createAssociation.isPending ? 'Adicionando…' : 'Adicionar curso'}
             </Button>
           </section>
         ) : (

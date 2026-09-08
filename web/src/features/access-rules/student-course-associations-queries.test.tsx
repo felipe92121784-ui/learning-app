@@ -8,6 +8,7 @@ import { accessRulesQueryKeys } from './access-rules-queries'
 import {
   studentCourseAssociationsQueryKeys,
   studentCourseAssociationsQueryOptions,
+  useCreateStudentCourseAssociationMutation,
   useDeleteStudentCourseAssociationMutation,
   useUpdateStudentCourseAssociationMutation,
 } from './student-course-associations-queries'
@@ -85,6 +86,27 @@ describe('student course association queries', () => {
       queryClient.getQueryState(
         accessRulesQueryKeys.direct({ userId: 12, resource: { type: 'COURSE', id: 7 } }),
       )?.isInvalidated,
+    ).toBe(true)
+    expect(
+      queryClient.getQueryState(studentCatalogKeys.courses())?.isInvalidated,
+    ).toBe(true)
+  })
+
+  it('invalidates the associated data after explicitly creating an association', async () => {
+    vi.stubEnv('VITE_API_URL', 'https://api.example.test/api/v1')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: association })))
+    const { queryClient, wrapper } = createHarness()
+    primeAssociatedCaches(queryClient, 12, 7)
+    const { result } = renderHook(() => useCreateStudentCourseAssociationMutation(), {
+      wrapper,
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({ userId: 12, courseId: 7, permission: 'READ' })
+    })
+
+    expect(
+      queryClient.getQueryState(studentCourseAssociationsQueryKeys.list(12))?.isInvalidated,
     ).toBe(true)
     expect(
       queryClient.getQueryState(studentCatalogKeys.courses())?.isInvalidated,

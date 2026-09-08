@@ -3,9 +3,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ApiError } from '@/lib/api-client'
 import { StudentCoursePermissionsDialog } from './student-course-permissions-dialog'
 
 const update = vi.fn()
+const create = vi.fn()
 const remove = vi.fn()
 const upsertRule = vi.fn()
 
@@ -62,6 +64,10 @@ vi.mock('./student-course-associations-queries', () => ({
     mutateAsync: update,
     isPending: false,
   }),
+  useCreateStudentCourseAssociationMutation: () => ({
+    mutateAsync: create,
+    isPending: false,
+  }),
   useDeleteStudentCourseAssociationMutation: () => ({
     mutateAsync: remove,
     isPending: false,
@@ -116,6 +122,7 @@ describe('StudentCoursePermissionsDialog', () => {
   afterEach(() => {
     cleanup()
     update.mockReset()
+    create.mockReset()
     remove.mockReset()
     upsertRule.mockReset()
     resetStates()
@@ -140,6 +147,21 @@ describe('StudentCoursePermissionsDialog', () => {
     expect(screen.getByRole('textbox', { name: 'Buscar curso' })).toBeTruthy()
     expect(screen.getByText('Segurança')).toBeTruthy()
     expect(screen.queryByText('Fundamentos de redes')).toBeNull()
+  })
+
+  it('creates an association explicitly when adding a course', async () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar curso' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Segurança' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar curso' }))
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith({
+      userId: 7,
+      courseId: 11,
+      permission: 'READ',
+    }))
+    expect(update).not.toHaveBeenCalled()
   })
 
   it('updates the course through its association when the course toggle changes', async () => {
@@ -167,6 +189,17 @@ describe('StudentCoursePermissionsDialog', () => {
     expect(await screen.findByText('Este curso não está mais atribuído ao aluno.')).toBeTruthy()
     expect(screen.queryByText('Curso: Fundamentos de redes')).toBeNull()
     expect(update).not.toHaveBeenCalled()
+  })
+
+  it('closes course configuration when the update reports a removed association', async () => {
+    update.mockRejectedValueOnce(new ApiError(409))
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+
+    fireEvent.click(screen.getAllByRole('radio', { name: 'Total' })[0]!)
+
+    expect(await screen.findByText('Este curso não está mais atribuído ao aluno.')).toBeTruthy()
+    expect(screen.queryByText('Curso: Fundamentos de redes')).toBeNull()
   })
 
   it.each(['expired', 'future'])('inherits current permission when the direct rule is %s', (window) => {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  createStudentCourseAssociation,
   deleteStudentCourseAssociation,
   listStudentCourseAssociations,
   updateStudentCourseAssociation,
@@ -54,6 +55,20 @@ describe('student course associations API', () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: 'PUT',
       body: JSON.stringify({ permission: 'FULL' }),
+    })
+  })
+
+  it('posts an explicit course association and unwraps it', async () => {
+    const fetchMock = useApiResponse({ data: association })
+
+    await expect(createStudentCourseAssociation(12, 7, 'READ')).resolves.toEqual(association)
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://api.example.test/api/v1/users/12/courses/7',
+    )
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ permission: 'READ' }),
     })
   })
 

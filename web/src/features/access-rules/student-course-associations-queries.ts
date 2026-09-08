@@ -8,6 +8,7 @@ import {
 import { studentCatalogKeys } from '@/features/student-catalog/student-catalog-queries'
 import { accessRulesQueryKeys } from './access-rules-queries'
 import {
+  createStudentCourseAssociation,
   deleteStudentCourseAssociation,
   listStudentCourseAssociations,
   updateStudentCourseAssociation,
@@ -48,6 +49,24 @@ interface UpdateStudentCourseAssociationVariables {
   userId: number
   courseId: number
   permission: CoursePermission
+}
+
+interface CreateStudentCourseAssociationVariables {
+  userId: number
+  courseId: number
+  permission: CoursePermission
+}
+
+export function useCreateStudentCourseAssociationMutation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ userId, courseId, permission }: CreateStudentCourseAssociationVariables) =>
+      createStudentCourseAssociation(userId, courseId, permission),
+    onSuccess: async (_association, { userId }) => {
+      await refreshAssociatedCourseData(queryClient, userId)
+    },
+  })
 }
 
 export function useUpdateStudentCourseAssociationMutation() {
