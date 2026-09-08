@@ -606,7 +606,7 @@ test.group('Administrative material uploads', (group) => {
           mimeType: upload.mimeType,
           size: upload.contents.length,
           position: upload.position,
-          processingStatus: 'PROCESSING',
+          processingStatus: upload.type === 'ZIP' ? 'READY' : 'PROCESSING',
         },
       })
       const responseText = JSON.stringify(response.body())
@@ -620,7 +620,7 @@ test.group('Administrative material uploads', (group) => {
     assert.lengthOf(materials, 3)
     assert.deepEqual(
       materials.map((material) => material.processingStatus),
-      ['PROCESSING', 'PROCESSING', 'PROCESSING']
+      ['PROCESSING', 'PROCESSING', 'READY']
     )
     assert.equal(new Set(materials.map((material) => material.storageKey)).size, 3)
     for (const material of materials) {

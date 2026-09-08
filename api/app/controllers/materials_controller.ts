@@ -81,7 +81,7 @@ export default class MaterialsController {
             mimeType: file.mimeType,
             size: file.size,
             position,
-            processingStatus: 'PROCESSING',
+            processingStatus: file.type === 'ZIP' ? 'READY' : 'PROCESSING',
           },
           { client: trx }
         )
