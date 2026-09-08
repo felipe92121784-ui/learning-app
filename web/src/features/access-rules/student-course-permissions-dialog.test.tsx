@@ -149,12 +149,17 @@ describe('StudentCoursePermissionsDialog', () => {
     expect(screen.getByRole('button', { name: 'Remover curso Fundamentos de redes' })).toBeTruthy()
   })
 
-  it('uses a wide desktop dialog and keeps course actions adaptable on narrow screens', () => {
+  it('uses a right-side drawer with a fixed hierarchy for enrollment, course, modules, and files', () => {
     renderDialog()
 
     const dialog = screen.getByRole('dialog', { name: 'Cursos e permissões' })
-    expect(dialog.className).toContain('sm:max-w-6xl')
-    expect(dialog.className).toContain('sm:max-h-[calc(100vh-3rem)]')
+    expect(dialog.className).toContain('right-0')
+    expect(dialog.className).toContain('sm:max-w-[46rem]')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+    expect(screen.getByRole('region', { name: 'Período de acesso' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Permissão do curso' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Permissões por módulo e arquivo' })).toBeTruthy()
 
     const actions = screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }).parentElement
     expect(actions?.className).toContain('max-sm:grid')

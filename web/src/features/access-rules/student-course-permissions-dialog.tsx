@@ -19,6 +19,14 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import {
   useCourseQuery,
   useCoursesQuery,
 } from '@/features/courses/courses-queries'
@@ -292,27 +300,50 @@ function CourseAssociationPermissionControl({
   }
 
   return (
-    <div className="space-y-2">
-      <CoursePermissionToggle
-        disabled={isSaving || update.isPending}
-        label={`Permissão para o curso ${association.title}`}
-        name={`permission-${studentId}-COURSE-${association.id}`}
-        onChange={(permission) => void changePermission(permission)}
-        value={editingPeriod ? pendingPermission : association.permission}
-      />
-      <p className="text-xs text-muted-foreground">Regra do curso.</p>
-      {editingPeriod ? (
-        <fieldset className="space-y-3 rounded-md border p-3" disabled={isSaving || update.isPending}>
-          <legend className="text-sm font-medium">Definir período da matrícula</legend>
-          <p className="text-xs text-muted-foreground">Confirme o período antes de salvar. Para datas ausentes, sugerimos hoje e a mesma data no próximo ano. As exceções de módulos e materiais serão preservadas.</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="min-w-0 space-y-1 text-sm">Data de início da matrícula<Input type="date" value={dates.startDate} onChange={(event) => setDates({ ...dates, startDate: event.target.value })} /></label>
-            <label className="min-w-0 space-y-1 text-sm">Data de término da matrícula<Input type="date" min={dates.startDate} value={dates.endDate} onChange={(event) => setDates({ ...dates, endDate: event.target.value })} /></label>
+    <div className="space-y-4">
+      <section aria-label="Período de acesso" className="space-y-3 rounded-lg border bg-muted/20 p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h4 className="font-medium">Período de acesso</h4>
+            <p className="text-sm text-muted-foreground">Define quando o aluno pode acessar este curso e todo o seu conteúdo.</p>
           </div>
-          <p className="text-xs text-muted-foreground">Acesso até o fim da data de término, no horário de São Paulo.</p>
-          <Button type="button" onClick={savePeriod}>Salvar período e permissão</Button>
-        </fieldset>
-      ) : null}
+          {!editingPeriod ? (
+            <Button onClick={() => setEditingPeriod(true)} size="sm" type="button" variant="outline">
+              Alterar período
+            </Button>
+          ) : null}
+        </div>
+        {editingPeriod ? (
+          <fieldset className="space-y-3" disabled={isSaving || update.isPending}>
+            <legend className="sr-only">Definir período da matrícula</legend>
+            <p className="text-xs text-muted-foreground">Confirme o período antes de salvar. Para datas ausentes, sugerimos hoje e a mesma data no próximo ano. As exceções de módulos e materiais serão preservadas.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="min-w-0 space-y-1 text-sm">Data de início da matrícula<Input type="date" value={dates.startDate} onChange={(event) => setDates({ ...dates, startDate: event.target.value })} /></label>
+              <label className="min-w-0 space-y-1 text-sm">Data de término da matrícula<Input type="date" min={dates.startDate} value={dates.endDate} onChange={(event) => setDates({ ...dates, endDate: event.target.value })} /></label>
+            </div>
+            <p className="text-xs text-muted-foreground">Acesso até o fim da data de término, no horário de São Paulo.</p>
+            <Button type="button" onClick={savePeriod}>Salvar período e permissão</Button>
+          </fieldset>
+        ) : (
+          <dl className="grid gap-2 text-sm sm:grid-cols-2">
+            <div><dt className="text-muted-foreground">Início</dt><dd className="font-medium">{formatEnrollmentDate(association.startsAt!)}</dd></div>
+            <div><dt className="text-muted-foreground">Término</dt><dd className="font-medium">{formatEnrollmentDate(association.expiresAt!)}</dd></div>
+          </dl>
+        )}
+      </section>
+      <section aria-label="Permissão do curso" className="space-y-2 rounded-lg border p-4">
+        <div>
+          <h4 className="font-medium">Permissão do curso</h4>
+          <p className="text-sm text-muted-foreground">Esta é a regra padrão para módulos e arquivos sem exceção direta.</p>
+        </div>
+        <CoursePermissionToggle
+          disabled={isSaving || update.isPending}
+          label={`Permissão para o curso ${association.title}`}
+          name={`permission-${studentId}-COURSE-${association.id}`}
+          onChange={(permission) => void changePermission(permission)}
+          value={editingPeriod ? pendingPermission : association.permission}
+        />
+      </section>
       {saveError ? (
         <Alert variant="destructive">
           <AlertDescription>{saveError}</AlertDescription>
@@ -428,35 +459,33 @@ function CoursePermissionTree({
   }
 
   return (
-    <div className="space-y-4 rounded-md border bg-muted/20 p-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <p className="font-medium">Curso: {association.title}</p>
-          <p className="text-sm text-muted-foreground">
-            A regra do curso é o padrão para os itens abaixo sem exceção direta.
-          </p>
+    <div className="space-y-5">
+      <CourseAssociationPermissionControl
+        association={association}
+        studentId={studentId}
+        onAssociationMissing={onAssociationMissing}
+      />
+      <section aria-label="Permissões por módulo e arquivo" className="space-y-3">
+        <div>
+          <h4 className="font-medium">Permissões por módulo e arquivo</h4>
+          <p className="text-sm text-muted-foreground">Abra um módulo para visualizar e ajustar as exceções dos seus materiais.</p>
         </div>
-        <CourseAssociationPermissionControl
-          association={association}
-          studentId={studentId}
-          onAssociationMissing={onAssociationMissing}
-        />
-      </div>
-      {course.data.modules.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Este curso ainda não possui módulos.</p>
-      ) : (
-        <Accordion className="space-y-3" type="multiple">
-          {course.data.modules.map((module) => (
-            <ModulePermissionRow
-              key={module.id}
-              module={module}
-              studentId={studentId}
-              courseId={association.id}
-              onAssociationMissing={onAssociationMissing}
-            />
-          ))}
-        </Accordion>
-      )}
+        {course.data.modules.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Este curso ainda não possui módulos.</div>
+        ) : (
+          <Accordion className="space-y-3" type="multiple">
+            {course.data.modules.map((module) => (
+              <ModulePermissionRow
+                key={module.id}
+                module={module}
+                studentId={studentId}
+                courseId={association.id}
+                onAssociationMissing={onAssociationMissing}
+              />
+            ))}
+          </Accordion>
+        )}
+      </section>
     </div>
   )
 }
@@ -545,23 +574,23 @@ export function StudentCoursePermissionsDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100vh-1rem)] max-w-[calc(100%-1rem)] overflow-y-auto p-4 sm:max-h-[calc(100vh-3rem)] sm:max-w-6xl sm:p-6">
-        <DialogHeader>
-          <DialogTitle>Cursos e permissões</DialogTitle>
-          <DialogDescription>
-            Gerencie os cursos de {student.fullName} e as exceções de acesso por conteúdo.
-          </DialogDescription>
-        </DialogHeader>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-[46rem]" side="right">
+        <SheetHeader className="shrink-0 border-b px-5 py-5 pr-12 sm:px-6">
+          <SheetTitle>Cursos e permissões</SheetTitle>
+          <SheetDescription>Gerencie o acesso de {student.fullName} a este curso.</SheetDescription>
+        </SheetHeader>
 
-        {error ? (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
 
-        {selectionOpen ? (
-          <section aria-label="Adicionar curso" className="space-y-4 rounded-md border p-4">
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {selectionOpen ? (
+            <section aria-label="Adicionar curso" className="space-y-4 rounded-lg border p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="font-medium">Adicionar curso</h3>
@@ -614,8 +643,8 @@ export function StudentCoursePermissionsDialog({
               {createAssociation.isPending ? 'Adicionando…' : 'Adicionar curso'}
             </Button>
           </section>
-        ) : (
-          <section className="space-y-4">
+          ) : (
+            <section className="space-y-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <h3 className="font-medium">Cursos atribuídos</h3>
@@ -650,9 +679,9 @@ export function StudentCoursePermissionsDialog({
                 Este aluno ainda não possui cursos atribuídos.
               </div>
             ) : null}
-            <div className="space-y-3">
+            <div className="space-y-4">
               {assigned.map((course) => (
-                <article className="rounded-md border p-4" key={course.id}>
+                <article className="rounded-lg border p-4" key={course.id}>
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0">
                       <h4 className="font-medium">{course.title}</h4>
@@ -684,7 +713,7 @@ export function StudentCoursePermissionsDialog({
                     </div>
                   </div>
                   {configuredCourseId === course.id || courseId === course.id ? (
-                    <div className="mt-4">
+                    <div className="mt-5 border-t pt-5">
                       <CoursePermissionTree
                         association={course}
                         studentId={student.id}
@@ -706,15 +735,16 @@ export function StudentCoursePermissionsDialog({
                 </article>
               ))}
             </div>
-          </section>
-        )}
+            </section>
+          )}
+        </div>
 
-        <DialogFooter>
+        <SheetFooter className="shrink-0 border-t bg-background px-5 py-4 sm:px-6">
           <Button onClick={() => onOpenChange(false)} type="button" variant="outline">
             Fechar
           </Button>
-        </DialogFooter>
-      </DialogContent>
+        </SheetFooter>
+      </SheetContent>
 
       <Dialog open={courseToRemove !== null} onOpenChange={(isOpen) => !isOpen && setCourseToRemove(null)}>
         <DialogContent>
@@ -741,6 +771,6 @@ export function StudentCoursePermissionsDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Dialog>
+    </Sheet>
   )
 }
