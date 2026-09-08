@@ -10,6 +10,16 @@ export type CoursePermission = (typeof COURSE_PERMISSIONS)[number]
 export interface StudentCourseAssociation {
   course: Course
   permission: CoursePermission
+  startsAt: DateTime | null
+  expiresAt: DateTime | null
+  status: StudentCourseAssociationStatus
+}
+
+export type StudentCourseAssociationStatus = 'SCHEDULED' | 'ACTIVE' | 'EXPIRED'
+
+export interface StudentCourseAssociationPeriod {
+  startsAt: DateTime
+  expiresAt: DateTime
 }
 
 export class StudentCourseAssociationNotFoundError extends Error {
@@ -47,31 +57,32 @@ export default class StudentCourseAssociationService {
       rulesByCourse.set(rule.resourceId, [...(rulesByCourse.get(rule.resourceId) ?? []), rule])
     }
 
-    const now = DateTime.utc()
     return courses.map((course) => ({
       course,
-      permission: permissionFromRules(rulesByCourse.get(course.id) ?? [], now),
+      ...associationFromRules(rulesByCourse.get(course.id) ?? []),
     }))
   }
 
   async create(
     userId: number,
     courseId: number,
-    permission: CoursePermission
+    permission: CoursePermission,
+    period: StudentCourseAssociationPeriod
   ): Promise<StudentCourseAssociation> {
     const course = await db.transaction(async (trx) => {
       const lockedCourse = await lockCourse(courseId, trx)
-      await writePermission(trx, userId, lockedCourse.id, permission)
+      await writePermission(trx, userId, lockedCourse.id, permission, period)
       return lockedCourse
     })
 
-    return { course, permission }
+    return { course, permission, ...period, status: statusForPeriod(period) }
   }
 
   async update(
     userId: number,
     courseId: number,
-    permission: CoursePermission
+    permission: CoursePermission,
+    period: StudentCourseAssociationPeriod
   ): Promise<StudentCourseAssociation> {
     const course = await db.transaction(async (trx) => {
       const lockedCourse = await lockCourse(courseId, trx)
@@ -83,11 +94,11 @@ export default class StudentCourseAssociationService {
         throw new StudentCourseAssociationNotFoundError()
       }
 
-      await writePermission(trx, userId, lockedCourse.id, permission)
+      await writePermission(trx, userId, lockedCourse.id, permission, period)
       return lockedCourse
     })
 
-    return { course, permission }
+    return { course, permission, ...period, status: statusForPeriod(period) }
   }
 
   async remove(userId: number, courseId: number): Promise<void> {
@@ -127,29 +138,46 @@ function effectsFor(permission: CoursePermission): { view: AccessEffect; downloa
   }
 }
 
-function permissionFromRules(rules: AccessRule[], now: DateTime): CoursePermission {
-  const activeRules = rules.filter(
-    (rule) =>
-      (!rule.startsAt || rule.startsAt.toMillis() <= now.toMillis()) &&
-      (!rule.expiresAt || now.toMillis() < rule.expiresAt.toMillis())
-  )
-  const view = activeRules.find((rule) => rule.capability === 'VIEW')?.effect
-  const download = activeRules.find((rule) => rule.capability === 'DOWNLOAD')?.effect
+function associationFromRules(rules: AccessRule[]): Omit<StudentCourseAssociation, 'course'> {
+  const viewRule = rules.find((rule) => rule.capability === 'VIEW')
+  const downloadRule = rules.find((rule) => rule.capability === 'DOWNLOAD')
+  const view = viewRule?.effect
+  const download = downloadRule?.effect
+  const startsAt = viewRule?.startsAt ?? downloadRule?.startsAt ?? null
+  const expiresAt = viewRule?.expiresAt ?? downloadRule?.expiresAt ?? null
 
+  let permission: CoursePermission
   if (view === 'ALLOW' && download === 'ALLOW') {
-    return 'FULL'
+    permission = 'FULL'
+  } else if (view === 'ALLOW') {
+    permission = 'READ'
+  } else {
+    permission = 'NONE'
   }
-  if (view === 'ALLOW') {
-    return 'READ'
+
+  return { permission, startsAt, expiresAt, status: statusForPeriod({ startsAt, expiresAt }) }
+}
+
+function statusForPeriod(period: {
+  startsAt: DateTime | null
+  expiresAt: DateTime | null
+}): StudentCourseAssociationStatus {
+  const now = DateTime.utc()
+  if (period.startsAt && now.toMillis() < period.startsAt.toMillis()) {
+    return 'SCHEDULED'
   }
-  return 'NONE'
+  if (period.expiresAt && now.toMillis() >= period.expiresAt.toMillis()) {
+    return 'EXPIRED'
+  }
+  return 'ACTIVE'
 }
 
 async function writePermission(
   trx: TransactionClientContract,
   userId: number,
   courseId: number,
-  permission: CoursePermission
+  permission: CoursePermission,
+  period: StudentCourseAssociationPeriod
 ) {
   const effects = effectsFor(permission)
   const now = new Date()
@@ -157,8 +185,8 @@ async function writePermission(
   await trx
     .table('access_rules')
     .insert([
-      courseRule(userId, courseId, 'VIEW', effects.view, now),
-      courseRule(userId, courseId, 'DOWNLOAD', effects.download, now),
+      courseRule(userId, courseId, 'VIEW', effects.view, now, period),
+      courseRule(userId, courseId, 'DOWNLOAD', effects.download, now, period),
     ])
     .onConflict(['user_id', 'resource_type', 'resource_id', 'capability'])
     .merge(['effect', 'starts_at', 'expires_at', 'updated_at'])
@@ -169,7 +197,8 @@ function courseRule(
   courseId: number,
   capability: 'VIEW' | 'DOWNLOAD',
   effect: AccessEffect,
-  now: Date
+  now: Date,
+  period: StudentCourseAssociationPeriod
 ) {
   return {
     user_id: userId,
@@ -177,8 +206,8 @@ function courseRule(
     resource_id: courseId,
     capability,
     effect,
-    starts_at: null,
-    expires_at: null,
+    starts_at: period.startsAt.toSQL(),
+    expires_at: period.expiresAt.toSQL(),
     created_at: now,
     updated_at: now,
   }

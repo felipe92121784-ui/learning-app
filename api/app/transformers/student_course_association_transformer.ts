@@ -7,6 +7,9 @@ export default class StudentCourseAssociationTransformer extends BaseTransformer
     return {
       ...new CourseTransformer(this.resource.course).toObject(),
       permission: this.resource.permission,
+      startsAt: this.resource.startsAt?.toUTC().toISO() ?? null,
+      expiresAt: this.resource.expiresAt?.toUTC().toISO() ?? null,
+      status: this.resource.status,
     }
   }
 }

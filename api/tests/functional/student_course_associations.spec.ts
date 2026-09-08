@@ -111,12 +111,73 @@ test.group('Administrative student course associations API', (group) => {
         id: firstCourse.id,
         title: 'First associated course',
         description: null,
-        status: 'DRAFT',
         permission: 'READ',
+        startsAt: null,
+        expiresAt: null,
+        status: 'ACTIVE',
         createdAt: firstCourse.createdAt.toISO(),
         updatedAt: firstCourse.updatedAt?.toISO() ?? null,
       },
     ])
+  })
+
+  test('lists scheduled, active, and expired dated course associations', async ({
+    assert,
+    client,
+  }) => {
+    const scheduledCourse = await Course.create({ title: 'Scheduled associated course' })
+    const activeCourse = await Course.create({ title: 'Active associated course' })
+    const expiredCourse = await Course.create({ title: 'Expired associated course' })
+    const scheduledStart = DateTime.utc().plus({ days: 1 }).startOf('second')
+    const scheduledEnd = scheduledStart.plus({ days: 7 })
+    const activeStart = DateTime.utc().minus({ days: 1 }).startOf('second')
+    const activeEnd = DateTime.utc().plus({ days: 1 }).startOf('second')
+    const expiredStart = DateTime.utc().minus({ days: 7 }).startOf('second')
+    const expiredEnd = DateTime.utc().minus({ days: 1 }).startOf('second')
+    const session = await login(client, admin)
+
+    for (const [course, permission, startsAt, expiresAt] of [
+      [scheduledCourse, 'READ', scheduledStart, scheduledEnd],
+      [activeCourse, 'FULL', activeStart, activeEnd],
+      [expiredCourse, 'NONE', expiredStart, expiredEnd],
+    ] as const) {
+      const response = await withCsrf(
+        client.post(`/api/v1/users/${student.id}/courses/${course.id}`),
+        session
+      ).unsafeJson({ permission, startsAt: startsAt.toISO(), expiresAt: expiresAt.toISO() })
+
+      response.assertStatus(200)
+    }
+
+    const response = await client
+      .get(`/api/v1/users/${student.id}/courses`)
+      .cookie(session.name, session.value)
+
+    response.assertStatus(200)
+    const associations = response.body().data
+    for (const [course, permission, startsAt, expiresAt, status] of [
+      [scheduledCourse, 'READ', scheduledStart, scheduledEnd, 'SCHEDULED'],
+      [activeCourse, 'FULL', activeStart, activeEnd, 'ACTIVE'],
+      [expiredCourse, 'NONE', expiredStart, expiredEnd, 'EXPIRED'],
+    ] as const) {
+      const association = associations.find((item: { id: number }) => item.id === course.id)
+      assert.deepEqual(
+        {
+          id: association.id,
+          permission: association.permission,
+          startsAt: association.startsAt,
+          expiresAt: association.expiresAt,
+          status: association.status,
+        },
+        {
+          id: course.id,
+          permission,
+          startsAt: startsAt.toISO(),
+          expiresAt: expiresAt.toISO(),
+          status,
+        }
+      )
+    }
   })
 
   test('creates a course association explicitly and updates its paired direct permission rules', async ({
@@ -125,28 +186,58 @@ test.group('Administrative student course associations API', (group) => {
   }) => {
     const session = await login(client, admin)
 
-    for (const [method, permission, view, download] of [
-      ['post', 'NONE', 'DENY', 'DENY'],
-      ['put', 'READ', 'ALLOW', 'DENY'],
-      ['put', 'FULL', 'ALLOW', 'ALLOW'],
+    const startsAt = DateTime.utc().minus({ hours: 1 }).startOf('second')
+    const expiresAt = DateTime.utc().plus({ days: 1 }).startOf('second')
+    const updatedStartsAt = DateTime.utc().plus({ days: 2 }).startOf('second')
+    const updatedExpiresAt = DateTime.utc().plus({ days: 3 }).startOf('second')
+
+    for (const [method, permission, view, download, period] of [
+      ['post', 'NONE', 'DENY', 'DENY', { startsAt, expiresAt }],
+      ['put', 'READ', 'ALLOW', 'DENY', { startsAt: updatedStartsAt, expiresAt: updatedExpiresAt }],
+      ['put', 'FULL', 'ALLOW', 'ALLOW', { startsAt, expiresAt }],
     ] as const) {
       const response = await withCsrf(
         client[method](`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
         session
-      ).unsafeJson({ permission })
+      ).unsafeJson({
+        permission,
+        startsAt: period.startsAt.toISO(),
+        expiresAt: period.expiresAt.toISO(),
+      })
 
       response.assertStatus(200)
       response.assertBodyContains({
-        data: { id: firstCourse.id, permission, title: 'First associated course' },
+        data: {
+          id: firstCourse.id,
+          permission,
+          title: 'First associated course',
+          startsAt: period.startsAt.toISO(),
+          expiresAt: period.expiresAt.toISO(),
+        },
       })
       const rules = await AccessRule.query()
         .where({ userId: student.id, resourceType: 'COURSE', resourceId: firstCourse.id })
         .orderBy('capability', 'asc')
       assert.deepEqual(
-        rules.map((rule) => ({ capability: rule.capability, effect: rule.effect })),
+        rules.map((rule) => ({
+          capability: rule.capability,
+          effect: rule.effect,
+          startsAt: rule.startsAt?.toUTC().toISO() ?? null,
+          expiresAt: rule.expiresAt?.toUTC().toISO() ?? null,
+        })),
         [
-          { capability: 'DOWNLOAD', effect: download },
-          { capability: 'VIEW', effect: view },
+          {
+            capability: 'DOWNLOAD',
+            effect: download,
+            startsAt: period.startsAt.toISO(),
+            expiresAt: period.expiresAt.toISO(),
+          },
+          {
+            capability: 'VIEW',
+            effect: view,
+            startsAt: period.startsAt.toISO(),
+            expiresAt: period.expiresAt.toISO(),
+          },
         ]
       )
     }
@@ -157,10 +248,12 @@ test.group('Administrative student course associations API', (group) => {
     client,
   }) => {
     const session = await login(client, admin)
+    const startsAt = DateTime.utc().minus({ hours: 1 }).startOf('second')
+    const expiresAt = DateTime.utc().plus({ days: 1 }).startOf('second')
     const create = await withCsrf(
       client.post(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
       session
-    ).unsafeJson({ permission: 'READ' })
+    ).unsafeJson({ permission: 'READ', startsAt: startsAt.toISO(), expiresAt: expiresAt.toISO() })
     create.assertStatus(200)
 
     const remove = await withCsrf(
@@ -172,7 +265,7 @@ test.group('Administrative student course associations API', (group) => {
     const update = await withCsrf(
       client.put(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
       session
-    ).unsafeJson({ permission: 'FULL' })
+    ).unsafeJson({ permission: 'FULL', startsAt: startsAt.toISO(), expiresAt: expiresAt.toISO() })
 
     update.assertStatus(409)
     assert.lengthOf(
@@ -185,7 +278,7 @@ test.group('Administrative student course associations API', (group) => {
     )
   })
 
-  test('keeps temporal course rules from determining the current association permission', async ({
+  test('derives stored association permission even when its direct rules are outside their window', async ({
     assert,
     client,
   }) => {
@@ -214,7 +307,8 @@ test.group('Administrative student course associations API', (group) => {
       .cookie(session.name, session.value)
 
     response.assertStatus(200)
-    assert.equal(response.body().data[0].permission, 'NONE')
+    assert.equal(response.body().data[0].permission, 'FULL')
+    assert.equal(response.body().data[0].status, 'SCHEDULED')
   })
 
   test('removes direct rules inside the selected course while preserving unrelated rules', async ({
@@ -378,6 +472,22 @@ test.group('Administrative student course associations API', (group) => {
       client.put(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
       adminSession
     ).unsafeJson({ permission: 'EDIT' })
+    const invalidWindow = await withCsrf(
+      client.post(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
+      adminSession
+    ).unsafeJson({
+      permission: 'READ',
+      startsAt: '2026-09-07T12:00:00.000Z',
+      expiresAt: '2026-09-06T12:00:00.000Z',
+    })
+    const nonUtcWindow = await withCsrf(
+      client.post(`/api/v1/users/${student.id}/courses/${firstCourse.id}`),
+      adminSession
+    ).unsafeJson({
+      permission: 'READ',
+      startsAt: '2026-09-06T12:00:00.000-03:00',
+      expiresAt: '2026-09-07T12:00:00.000Z',
+    })
 
     guest.assertStatus(401)
     nonAdmin.assertStatus(403)
@@ -386,5 +496,7 @@ test.group('Administrative student course associations API', (group) => {
     unknownStudent.assertStatus(422)
     unknownCourse.assertStatus(422)
     invalidPermission.assertStatus(422)
+    invalidWindow.assertStatus(422)
+    nonUtcWindow.assertStatus(422)
   })
 })

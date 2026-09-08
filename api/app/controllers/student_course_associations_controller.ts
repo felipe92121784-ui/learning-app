@@ -8,6 +8,7 @@ import { fieldError } from '#validators/access_rule'
 import {
   studentCourseAssociationTargetValidator,
   studentCourseAssociationUserValidator,
+  parseStudentCourseAssociationPeriod,
   updateStudentCourseAssociationValidator,
 } from '#validators/student_course_association'
 import type { HttpContext } from '@adonisjs/core/http'
@@ -25,22 +26,38 @@ export default class StudentCourseAssociationsController {
 
   async create({ params, request, serialize }: HttpContext) {
     const target = await studentCourseAssociationTargetValidator.validate(params)
-    const { permission } = await request.validateUsing(updateStudentCourseAssociationValidator)
+    const { permission, startsAt, expiresAt } = await request.validateUsing(
+      updateStudentCourseAssociationValidator
+    )
+    const period = parseStudentCourseAssociationPeriod(startsAt, expiresAt)
     await this.ensureStudent(target.userId)
     await this.ensureCourse(target.courseId)
-    const association = await this.associations.create(target.userId, target.courseId, permission)
+    const association = await this.associations.create(
+      target.userId,
+      target.courseId,
+      permission,
+      period
+    )
 
     return serialize(StudentCourseAssociationTransformer.transform(association))
   }
 
   async update({ params, request, response, serialize }: HttpContext) {
     const target = await studentCourseAssociationTargetValidator.validate(params)
-    const { permission } = await request.validateUsing(updateStudentCourseAssociationValidator)
+    const { permission, startsAt, expiresAt } = await request.validateUsing(
+      updateStudentCourseAssociationValidator
+    )
+    const period = parseStudentCourseAssociationPeriod(startsAt, expiresAt)
     await this.ensureStudent(target.userId)
     await this.ensureCourse(target.courseId)
 
     try {
-      const association = await this.associations.update(target.userId, target.courseId, permission)
+      const association = await this.associations.update(
+        target.userId,
+        target.courseId,
+        permission,
+        period
+      )
       return serialize(StudentCourseAssociationTransformer.transform(association))
     } catch (error) {
       if (error instanceof StudentCourseAssociationNotFoundError) {
