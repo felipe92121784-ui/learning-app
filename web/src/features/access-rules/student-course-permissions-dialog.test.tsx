@@ -55,6 +55,9 @@ function resetStates() {
 resetStates()
 
 vi.mock('./student-course-associations-queries', () => ({
+  studentCourseAssociationsQueryKeys: {
+    list: (userId: number) => ['student-course-associations', 'list', userId],
+  },
   useStudentCourseAssociationsQuery: () => associationResponses.shift() ?? associationsState,
   studentCourseAssociationsQueryOptions: (userId: number) => ({
     queryKey: ['student-course-associations', 'list', userId],
@@ -107,7 +110,7 @@ function renderDialog() {
     defaultOptions: { queries: { retry: false } },
   })
 
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <StudentCoursePermissionsDialog
         open
@@ -116,6 +119,8 @@ function renderDialog() {
       />
     </QueryClientProvider>,
   )
+
+  return { ...result, queryClient }
 }
 
 describe('StudentCoursePermissionsDialog', () => {
@@ -193,13 +198,19 @@ describe('StudentCoursePermissionsDialog', () => {
 
   it('closes course configuration when the update reports a removed association', async () => {
     update.mockRejectedValueOnce(new ApiError(409))
-    renderDialog()
+    const { queryClient } = renderDialog()
+    queryClient.setQueryData(
+      ['student-course-associations', 'list', 7],
+      [assignedCourse],
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
 
     fireEvent.click(screen.getAllByRole('radio', { name: 'Total' })[0]!)
 
     expect(await screen.findByText('Este curso não está mais atribuído ao aluno.')).toBeTruthy()
     expect(screen.queryByText('Curso: Fundamentos de redes')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Configurar Fundamentos de redes' })).toBeNull()
+    expect(queryClient.getQueryData(['student-course-associations', 'list', 7])).toEqual([])
   })
 
   it.each(['expired', 'future'])('inherits current permission when the direct rule is %s', (window) => {

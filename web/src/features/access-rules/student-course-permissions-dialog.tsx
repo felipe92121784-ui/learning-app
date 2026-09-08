@@ -39,6 +39,7 @@ import {
   useStudentCourseAssociationsQuery,
   useUpdateStudentCourseAssociationMutation,
   studentCourseAssociationsQueryOptions,
+  studentCourseAssociationsQueryKeys,
 } from './student-course-associations-queries'
 import type { StudentCourseAssociation } from './student-course-associations-types'
 
@@ -100,7 +101,7 @@ function ResourcePermissionControl({
   resource: AccessResource
   studentId: number
   courseId: number
-  onAssociationMissing: () => void
+  onAssociationMissing: () => void | Promise<void>
 }) {
   const target = { userId: studentId, resource }
   const directRules = useAccessRulesQuery(target)
@@ -135,7 +136,7 @@ function ResourcePermissionControl({
         studentCourseAssociationsQueryOptions(studentId),
       )
       if (!latestAssociations.some((association) => association.id === courseId)) {
-        onAssociationMissing()
+        await onAssociationMissing()
         setSaveError('Este curso não está mais atribuído ao aluno.')
         return
       }
@@ -210,7 +211,7 @@ function CourseAssociationPermissionControl({
 }: {
   association: StudentCourseAssociation
   studentId: number
-  onAssociationMissing: () => void
+  onAssociationMissing: () => void | Promise<void>
 }) {
   const update = useUpdateStudentCourseAssociationMutation()
   const queryClient = useQueryClient()
@@ -227,7 +228,7 @@ function CourseAssociationPermissionControl({
         staleTime: 0,
       })
       if (!latestAssociations.some((course) => course.id === association.id)) {
-        onAssociationMissing()
+        await onAssociationMissing()
         return
       }
       await update.mutateAsync({
@@ -237,7 +238,7 @@ function CourseAssociationPermissionControl({
       })
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        onAssociationMissing()
+        await onAssociationMissing()
         return
       }
       setSaveError('Não foi possível salvar a permissão do curso. Tente novamente.')
@@ -274,7 +275,7 @@ function MaterialPermissionRow({
   material: Material
   studentId: number
   courseId: number
-  onAssociationMissing: () => void
+  onAssociationMissing: () => void | Promise<void>
 }) {
   return (
     <li className="flex flex-col gap-3 border-t py-3 pl-4 sm:flex-row sm:items-center sm:justify-between">
@@ -301,7 +302,7 @@ function ModulePermissionRow({
   module: CourseModule
   studentId: number
   courseId: number
-  onAssociationMissing: () => void
+  onAssociationMissing: () => void | Promise<void>
 }) {
   const materials = useMaterialsQuery(module.id)
 
@@ -351,7 +352,7 @@ function CoursePermissionTree({
 }: {
   association: StudentCourseAssociation
   studentId: number
-  onAssociationMissing: () => void
+  onAssociationMissing: () => void | Promise<void>
 }) {
   const course = useCourseQuery(association.id)
 
@@ -403,6 +404,7 @@ export function StudentCoursePermissionsDialog({
   student,
 }: StudentCoursePermissionsDialogProps) {
   const associations = useStudentCourseAssociationsQuery(student.id)
+  const queryClient = useQueryClient()
   const courses = useCoursesQuery()
   const createAssociation = useCreateStudentCourseAssociationMutation()
   const deleteAssociation = useDeleteStudentCourseAssociationMutation()
@@ -413,9 +415,12 @@ export function StudentCoursePermissionsDialog({
   const [courseToRemove, setCourseToRemove] = useState<StudentCourseAssociation | null>(null)
   const [search, setSearch] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [removedCourseIds, setRemovedCourseIds] = useState<Set<number>>(() => new Set())
 
   const associationsReady = associations.isSuccess
-  const assigned = associationsReady ? associations.data : []
+  const assigned = associationsReady
+    ? associations.data.filter((course) => !removedCourseIds.has(course.id))
+    : []
   const availableCourses = useMemo(() => {
     if (!associationsReady) return []
 
@@ -442,6 +447,12 @@ export function StudentCoursePermissionsDialog({
       setSelectionOpen(false)
       setSelectedCourseId(null)
       setSearch('')
+      setRemovedCourseIds((current) => {
+        if (!current.has(selectedCourseId)) return current
+        const next = new Set(current)
+        next.delete(selectedCourseId)
+        return next
+      })
     } catch {
       setError('Não foi possível atribuir o curso. Tente novamente.')
     }
@@ -606,7 +617,15 @@ export function StudentCoursePermissionsDialog({
                       <CoursePermissionTree
                         association={course}
                         studentId={student.id}
-                        onAssociationMissing={() => {
+                        onAssociationMissing={async () => {
+                          queryClient.setQueryData<StudentCourseAssociation[]>(
+                            studentCourseAssociationsQueryKeys.list(student.id),
+                            (current) => current?.filter((association) => association.id !== course.id) ?? [],
+                          )
+                          setRemovedCourseIds((current) => new Set(current).add(course.id))
+                          await queryClient.invalidateQueries({
+                            queryKey: studentCourseAssociationsQueryKeys.list(student.id),
+                          })
                           setConfiguredCourseId(null)
                           setError('Este curso não está mais atribuído ao aluno.')
                         }}
