@@ -25,6 +25,7 @@ import {
 import type { CourseModule } from '@/features/courses/courses-types'
 import { useMaterialsQuery } from '@/features/materials/materials-queries'
 import type { Material } from '@/features/materials/materials-types'
+import { defaultEnrollmentDates, saoPauloDateRangeToUtc } from '@/features/users/enrollment-period'
 import { CoursePermissionToggle } from './course-permission-toggle'
 import { coursePermissionRules, type CoursePermission } from './course-permission'
 import {
@@ -53,6 +54,7 @@ interface StudentCoursePermissionsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   student: { id: number; fullName: string }
+  courseId?: number
 }
 
 function permissionFromEffects(view: boolean, download: boolean): CoursePermission {
@@ -240,14 +242,20 @@ function CourseAssociationPermissionControl({
         ...studentCourseAssociationsQueryOptions(studentId),
         staleTime: 0,
       })
-      if (!latestAssociations.some((course) => course.id === association.id)) {
+      const latestAssociation = latestAssociations.find((course) => course.id === association.id)
+      if (!latestAssociation) {
         await onAssociationMissing()
+        return
+      }
+      if (!latestAssociation.startsAt || !latestAssociation.expiresAt) {
+        setSaveError('Este curso não possui um período de acesso definido. Atualize a matrícula antes de alterar a permissão.')
         return
       }
       await update.mutateAsync({
         userId: studentId,
         courseId: association.id,
         permission,
+        period: { startsAt: latestAssociation.startsAt, expiresAt: latestAssociation.expiresAt },
       })
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
@@ -422,6 +430,7 @@ export function StudentCoursePermissionsDialog({
   open,
   onOpenChange,
   student,
+  courseId,
 }: StudentCoursePermissionsDialogProps) {
   const associations = useStudentCourseAssociationsQuery(student.id)
   const queryClient = useQueryClient()
@@ -439,7 +448,7 @@ export function StudentCoursePermissionsDialog({
 
   const associationsReady = associations.isSuccess
   const assigned = associationsReady
-    ? associations.data.filter((course) => !removedCourseIds.has(course.id))
+    ? associations.data.filter((course) => !removedCourseIds.has(course.id) && (courseId === undefined || course.id === courseId))
     : []
   const availableCourses = useMemo(() => {
     if (!associationsReady) return []
@@ -459,10 +468,12 @@ export function StudentCoursePermissionsDialog({
     setError(null)
 
     try {
+      const dates = defaultEnrollmentDates(new Date())
       await createAssociation.mutateAsync({
         userId: student.id,
         courseId: selectedCourseId,
         permission: newPermission,
+        period: saoPauloDateRangeToUtc(dates.startDate, dates.endDate),
       })
       setSelectionOpen(false)
       setSelectedCourseId(null)
@@ -575,14 +586,14 @@ export function StudentCoursePermissionsDialog({
                   Configure exceções apenas quando o aluno precisar fugir da regra do curso.
                 </p>
               </div>
-              <Button
+              {courseId === undefined ? <Button
                 className="max-sm:w-full"
                 disabled={!associationsReady}
                 onClick={() => setSelectionOpen(true)}
                 type="button"
               >
                 Adicionar curso
-              </Button>
+              </Button> : null}
             </div>
             {associations.isPending ? (
               <p className="text-sm text-muted-foreground">Carregando cursos atribuídos…</p>
@@ -613,7 +624,7 @@ export function StudentCoursePermissionsDialog({
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2 max-sm:grid max-sm:grid-cols-2">
-                      <Button
+                      {courseId === undefined ? <Button
                         aria-label={`Configurar ${course.title}`}
                         className="max-sm:w-full"
                         onClick={() => setConfiguredCourseId((current) => current === course.id ? null : course.id)}
@@ -622,7 +633,7 @@ export function StudentCoursePermissionsDialog({
                         variant="outline"
                       >
                         {configuredCourseId === course.id ? 'Ocultar configuração' : 'Configurar'}
-                      </Button>
+                      </Button> : null}
                       <Button
                         aria-label={`Remover curso ${course.title}`}
                         className="max-sm:w-full"
@@ -635,7 +646,7 @@ export function StudentCoursePermissionsDialog({
                       </Button>
                     </div>
                   </div>
-                  {configuredCourseId === course.id ? (
+                  {configuredCourseId === course.id || courseId === course.id ? (
                     <div className="mt-4">
                       <CoursePermissionTree
                         association={course}

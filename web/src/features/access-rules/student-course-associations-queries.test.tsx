@@ -76,7 +76,10 @@ describe('student course association queries', () => {
     })
 
     await act(async () => {
-      await result.current.mutateAsync({ userId: 12, courseId: 7, permission: 'READ' })
+      await result.current.mutateAsync({
+        userId: 12, courseId: 7, permission: 'READ',
+        period: { startsAt: '2026-09-08T03:00:00.000Z', expiresAt: '2027-09-09T02:59:59.999Z' },
+      })
     })
 
     expect(
@@ -102,7 +105,10 @@ describe('student course association queries', () => {
     })
 
     await act(async () => {
-      await result.current.mutateAsync({ userId: 12, courseId: 7, permission: 'READ' })
+      await result.current.mutateAsync({
+        userId: 12, courseId: 7, permission: 'READ',
+        period: { startsAt: '2026-09-08T03:00:00.000Z', expiresAt: '2027-09-09T02:59:59.999Z' },
+      })
     })
 
     expect(

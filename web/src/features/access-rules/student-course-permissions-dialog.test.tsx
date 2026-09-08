@@ -5,17 +5,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ApiError } from '@/lib/api-client'
 import { StudentCoursePermissionsDialog } from './student-course-permissions-dialog'
+import type { StudentCourseAssociation } from './student-course-associations-types'
 
 const update = vi.fn()
 const create = vi.fn()
 const remove = vi.fn()
 const upsertRule = vi.fn()
 
-const assignedCourse = {
+const assignedCourse: StudentCourseAssociation = {
   id: 9,
   title: 'Fundamentos de redes',
   description: 'Introdução',
-  status: 'PUBLISHED',
+  status: 'ACTIVE',
+  startsAt: '2026-09-08T03:00:00.000Z',
+  expiresAt: '2027-09-09T02:59:59.999Z',
   permission: 'READ' as const,
   createdAt: '2026-09-07T00:00:00.000Z',
   updatedAt: null,
@@ -179,6 +182,7 @@ describe('StudentCoursePermissionsDialog', () => {
       userId: 7,
       courseId: 11,
       permission: 'READ',
+      period: { startsAt: expect.any(String), expiresAt: expect.any(String) },
     }))
     expect(update).not.toHaveBeenCalled()
   })
@@ -195,6 +199,10 @@ describe('StudentCoursePermissionsDialog', () => {
       userId: 7,
       courseId: 9,
       permission: 'FULL',
+      period: {
+        startsAt: '2026-09-08T03:00:00.000Z',
+        expiresAt: '2027-09-09T02:59:59.999Z',
+      },
     }))
   })
 
@@ -212,6 +220,39 @@ describe('StudentCoursePermissionsDialog', () => {
 
     fireEvent.click(moduleTrigger)
     expect(moduleTrigger.getAttribute('data-state')).toBe('open')
+  })
+
+  it('preserves the latest enrollment dates when another administrator changed them', async () => {
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+    associationsState = { ...associationsState, data: [{
+      ...assignedCourse, startsAt: '2026-10-01T03:00:00.000Z', expiresAt: '2026-11-01T02:59:59.999Z',
+    }] }
+    fireEvent.click(screen.getAllByRole('radio', { name: 'Total' })[0]!)
+    await waitFor(() => expect(update).toHaveBeenCalledWith({
+      userId: 7, courseId: 9, permission: 'FULL',
+      period: { startsAt: '2026-10-01T03:00:00.000Z', expiresAt: '2026-11-01T02:59:59.999Z' },
+    }))
+  })
+
+  it('does not invent an enrollment period when legacy association dates are missing', async () => {
+    associationsState = { ...associationsState, data: [{ ...assignedCourse, startsAt: null, expiresAt: null }] }
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+    fireEvent.click(screen.getAllByRole('radio', { name: 'Total' })[0]!)
+    expect(await screen.findByText(/Este curso não possui um período de acesso definido/)).toBeTruthy()
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it.each(['PDF', 'IMAGE'])('preserves reading and full access for %s materials', (type) => {
+    courseState = { data: { modules: [{ id: 31, title: 'Módulo 1', description: null }] }, isPending: false }
+    materialsState = { data: [{ id: 41, title: 'Aula', originalFilename: 'aula', type }], isPending: false }
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+    fireEvent.click(screen.getByRole('button', { name: /Módulo: Módulo 1/ }))
+    const permission = screen.getByRole('group', { name: 'Permissão para material 41' })
+    expect(within(permission).getByRole('radio', { name: 'Leitura' })).toBeTruthy()
+    expect(within(permission).getByRole('radio', { name: 'Total' })).toBeTruthy()
   })
 
   it('shows ZIP materials as a download-only permission', () => {
