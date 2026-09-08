@@ -1,0 +1,59 @@
+import Course from '#models/course'
+import User from '#models/user'
+import StudentCourseAssociationService from '#services/student_course_association_service'
+import StudentCourseAssociationTransformer from '#transformers/student_course_association_transformer'
+import { fieldError } from '#validators/access_rule'
+import {
+  studentCourseAssociationTargetValidator,
+  studentCourseAssociationUserValidator,
+  updateStudentCourseAssociationValidator,
+} from '#validators/student_course_association'
+import type { HttpContext } from '@adonisjs/core/http'
+
+export default class StudentCourseAssociationsController {
+  private associations = new StudentCourseAssociationService()
+
+  async index({ params, serialize }: HttpContext) {
+    const { userId } = await studentCourseAssociationUserValidator.validate(params)
+    await this.ensureStudent(userId)
+    const associations = await this.associations.list(userId)
+
+    return serialize(StudentCourseAssociationTransformer.transform(associations))
+  }
+
+  async upsert({ params, request, serialize }: HttpContext) {
+    const target = await studentCourseAssociationTargetValidator.validate(params)
+    const { permission } = await request.validateUsing(updateStudentCourseAssociationValidator)
+    await this.ensureStudent(target.userId)
+    await this.ensureCourse(target.courseId)
+    const association = await this.associations.setPermission(
+      target.userId,
+      target.courseId,
+      permission
+    )
+
+    return serialize(StudentCourseAssociationTransformer.transform(association))
+  }
+
+  async destroy({ params, response }: HttpContext) {
+    const target = await studentCourseAssociationTargetValidator.validate(params)
+    await this.ensureStudent(target.userId)
+    await this.ensureCourse(target.courseId)
+    await this.associations.remove(target.userId, target.courseId)
+
+    return response.noContent()
+  }
+
+  private async ensureStudent(userId: number) {
+    const user = await User.find(userId)
+    if (!user || user.role !== 'STUDENT') {
+      throw fieldError('userId', 'The userId field must identify an existing student')
+    }
+  }
+
+  private async ensureCourse(courseId: number) {
+    if (!(await Course.find(courseId))) {
+      throw fieldError('courseId', 'The courseId field must identify an existing course')
+    }
+  }
+}

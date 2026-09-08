@@ -41,6 +41,15 @@ router
         router.get('users/:id', [controllers.Users, 'show'])
         router.patch('users/:id', [controllers.Users, 'update'])
         router.patch('users/:id/status', [controllers.Users, 'updateStatus'])
+        router.get('users/:userId/courses', [controllers.StudentCourseAssociations, 'index'])
+        router.put('users/:userId/courses/:courseId', [
+          controllers.StudentCourseAssociations,
+          'upsert',
+        ])
+        router.delete('users/:userId/courses/:courseId', [
+          controllers.StudentCourseAssociations,
+          'destroy',
+        ])
       })
       .use(middleware.auth({ guards: ['web'] }))
       .use(middleware.admin())
