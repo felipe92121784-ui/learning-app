@@ -1,22 +1,13 @@
 /* eslint-disable react/only-export-components */
-import { createFileRoute, Link } from '@tanstack/react-router'
-import { Button } from '@/components/ui/button'
+import { createFileRoute } from '@tanstack/react-router'
+import { AdminDashboardView } from '@/features/admin-dashboard/admin-dashboard'
+import { adminDashboardQueryOptions } from '@/features/admin-dashboard/admin-dashboard-queries'
 
 export const Route = createFileRoute('/_admin/admin/')({
+  loader: ({ context }) => context.queryClient.ensureQueryData(adminDashboardQueryOptions()),
   component: AdminPage,
 })
 
 function AdminPage() {
-  return (
-    <main>
-      <p className="text-sm font-medium text-slate-500">Administração</p>
-      <h1 className="mt-2 text-3xl font-semibold">Painel administrativo</h1>
-      <p className="mt-3 text-slate-600">
-        Gerencie os alunos e o acesso à plataforma.
-      </p>
-      <Button asChild className="mt-6">
-        <Link to="/admin/users">Gerenciar usuários</Link>
-      </Button>
-    </main>
-  )
+  return <AdminDashboardView />
 }

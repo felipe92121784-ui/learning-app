@@ -36,6 +36,7 @@ router
 
     router
       .group(() => {
+        router.get('dashboard', [controllers.AdminDashboard, 'show'])
         router.get('users', [controllers.Users, 'index'])
         router.post('users', [controllers.Users, 'store'])
         router.get('users/:id', [controllers.Users, 'show'])
