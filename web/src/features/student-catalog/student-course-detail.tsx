@@ -8,6 +8,7 @@ import {
   LockKeyhole,
   type LucideIcon,
 } from 'lucide-react'
+import { useState } from 'react'
 import {
   Accordion,
   AccordionContent,
@@ -17,6 +18,10 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  ProtectedMaterialDownloadButton,
+  ProtectedMaterialViewerDialog,
+} from '@/features/protected-viewer/protected-material-viewer'
 import type {
   StudentCourseDetail,
   StudentMaterial,
@@ -72,11 +77,11 @@ function MaterialStatus({ material }: { material: StudentMaterial }) {
 }
 
 function MaterialRow({
-  courseId,
   material,
+  onOpen,
 }: {
-  courseId: number
   material: StudentMaterial
+  onOpen: (material: StudentMaterial) => void
 }) {
   return (
     <li
@@ -94,18 +99,22 @@ function MaterialRow({
         </div>
       </div>
       {material.availability === 'AVAILABLE' ? (
-        <Button asChild className="shrink-0" size="sm" variant="outline">
-          <Link
-            aria-label={`Abrir ${material.title}`}
-            params={{
-              courseId: String(courseId),
-              materialId: String(material.id),
-            }}
-            to="/app/courses/$courseId/materials/$materialId"
+        material.type === 'ZIP' ? (
+          <div className="shrink-0">
+            <ProtectedMaterialDownloadButton materialId={material.id} label="Baixar ZIP" />
+          </div>
+        ) : (
+          <Button
+            aria-label={`Abrir visualização de ${material.title}`}
+            className="shrink-0"
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={() => onOpen(material)}
           >
             Abrir material
-          </Link>
-        </Button>
+          </Button>
+        )
       ) : null}
     </li>
   )
@@ -138,6 +147,8 @@ export function StudentCourseDetailView({
 }: {
   course: StudentCourseDetail
 }) {
+  const [selectedMaterial, setSelectedMaterial] = useState<StudentMaterial | null>(null)
+
   return (
     <main className="space-y-8">
       <StudentCourseBreadcrumb course={course} />
@@ -196,9 +207,9 @@ export function StudentCourseDetailView({
                   <ul className="space-y-3">
                     {module.materials.map((material) => (
                       <MaterialRow
-                        courseId={course.id}
                         key={material.id}
                         material={material}
+                        onOpen={setSelectedMaterial}
                       />
                     ))}
                   </ul>
@@ -208,6 +219,17 @@ export function StudentCourseDetailView({
           ))}
         </Accordion>
       )}
+
+      {selectedMaterial ? (
+        <ProtectedMaterialViewerDialog
+          materialId={selectedMaterial.id}
+          open
+          title={selectedMaterial.title}
+          onOpenChange={(open) => {
+            if (!open) setSelectedMaterial(null)
+          }}
+        />
+      ) : null}
     </main>
   )
 }

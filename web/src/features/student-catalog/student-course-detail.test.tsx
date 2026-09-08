@@ -9,7 +9,7 @@ import {
   Outlet,
   RouterProvider,
 } from '@tanstack/react-router'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { StudentCourseDetailView } from './student-course-detail'
@@ -147,7 +147,7 @@ describe('student course detail', () => {
     expect(moduleButtons[0]?.textContent).toContain('Módulo bloqueado')
   })
 
-  it('keeps locked and unavailable materials non-interactive and links only available materials', async () => {
+  it('keeps locked and unavailable materials non-interactive and offers inline actions only for available materials', async () => {
     renderWithRouter(<StudentCourseDetailView course={course} />)
 
     expect(await screen.findByText('Conteúdo bloqueado')).toBeTruthy()
@@ -157,12 +157,9 @@ describe('student course detail', () => {
     expect(screen.getByText('Material indisponível')).toBeTruthy()
     expect(screen.queryByRole('link', { name: /arquivo com falha/i })).toBeNull()
 
-    expect(
-      screen.getByRole('link', { name: 'Abrir Manual liberado' }).getAttribute('href'),
-    ).toBe('/app/courses/14/materials/42')
-    expect(
-      screen.getByRole('link', { name: 'Abrir Pacote liberado' }).getAttribute('href'),
-    ).toBe('/app/courses/14/materials/45')
+    expect(screen.getByRole('button', { name: 'Abrir visualização de Manual liberado' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Baixar ZIP' })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /abrir/i })).toBeNull()
   })
 
   it('labels material types, exposes breadcrumb navigation and ignores private-shaped extras', async () => {
@@ -179,6 +176,19 @@ describe('student course detail', () => {
     expect(container.innerHTML).not.toContain('minio.example.test')
   })
 
+  it('opens an available PDF in an in-place full-screen dialog', async () => {
+    renderWithRouter(<StudentCourseDetailView course={course} />)
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Abrir visualização de Manual liberado' }),
+    )
+
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(screen.getByText('Visualização de Manual liberado')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toContain('Carregando material protegido')
+    expect(screen.queryByRole('link', { name: /abrir manual liberado/i })).toBeNull()
+  })
+
   it('keeps a long valid material title accessible without placing it inside the mobile action', async () => {
     const longTitle = 'Introdução aos fundamentos e exercícios complementares para a formação continuada do estudante'
     const longTitleCourse: StudentCourseDetail = {
@@ -193,8 +203,8 @@ describe('student course detail', () => {
     }
     renderWithRouter(<StudentCourseDetailView course={longTitleCourse} />)
 
-    const link = await screen.findByRole('link', { name: `Abrir ${longTitle}` })
-    expect(link.textContent).toBe('Abrir material')
-    expect(link.getAttribute('aria-label')).toBe(`Abrir ${longTitle}`)
+    const action = await screen.findByRole('button', { name: `Abrir visualização de ${longTitle}` })
+    expect(action.textContent).toBe('Abrir material')
+    expect(action.getAttribute('aria-label')).toBe(`Abrir visualização de ${longTitle}`)
   })
 })
