@@ -1,0 +1,40 @@
+<h2>Permissões do aluno</h2>
+<p class="subtitle">Modal aberto pela tabela de Usuários. Marque o nível desejado; regras mais específicas aparecem logo abaixo do pai.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Marina Souza · Cursos e permissões</div>
+  <div class="mockup-body" style="padding:20px;max-width:760px;margin:auto">
+    <div style="display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:16px">
+      <div>
+        <div class="label">Acesso ao conteúdo</div>
+        <strong>Defina uma regra no nível mais amplo possível</strong>
+      </div>
+      <input class="mock-input" style="max-width:210px" placeholder="Buscar curso">
+    </div>
+    <div style="border:1px solid #d7dce5;border-radius:10px;overflow:hidden">
+      <div style="padding:14px 16px;background:#f7f8fa;display:flex;justify-content:space-between;align-items:center">
+        <div><strong>Segurança Industrial</strong><div style="font-size:13px;color:#64748b;margin-top:3px">3 módulos · acesso pelo curso</div></div>
+        <select style="padding:7px 10px;border-radius:7px;border:1px solid #cbd5e1"><option>Total</option><option>Leitura</option><option>Download</option><option>Sem acesso</option></select>
+      </div>
+      <div style="padding:10px 16px 12px 38px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center">
+        <div><strong>Normas e procedimentos</strong><div style="font-size:13px;color:#64748b">Herdando: Total do curso</div></div>
+        <select style="padding:7px 10px;border-radius:7px;border:1px solid #cbd5e1"><option>Herdar do curso</option><option>Leitura</option><option>Download</option><option>Total</option><option>Sem acesso</option></select>
+      </div>
+      <div style="padding:10px 16px 12px 62px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center">
+        <div><strong>Manual de segurança.pdf</strong><div style="font-size:13px;color:#64748b">Herdando: Total do curso</div></div>
+        <select style="padding:7px 10px;border-radius:7px;border:1px solid #cbd5e1"><option>Herdar do módulo</option><option>Leitura</option><option>Download</option><option>Total</option><option>Sem acesso</option></select>
+      </div>
+      <div style="padding:10px 16px 12px 38px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center">
+        <div><strong>Máquinas e equipamentos</strong><div style="font-size:13px;color:#64748b">Herdando: Total do curso</div></div>
+        <select style="padding:7px 10px;border-radius:7px;border:1px solid #cbd5e1"><option>Herdar do curso</option><option>Leitura</option><option>Download</option><option>Total</option><option>Sem acesso</option></select>
+      </div>
+    </div>
+    <p style="font-size:13px;color:#64748b;margin:14px 0">Total = leitura + download. Leitura = visualizar sem baixar. Download = permite baixar e também exige leitura.</p>
+    <div style="display:flex;justify-content:flex-end;gap:10px"><button class="mock-button" style="background:#fff;color:#334155;border:1px solid #cbd5e1">Cancelar</button><button class="mock-button">Salvar permissões</button></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px">
+  <h3>Comportamento proposto</h3>
+  <p>O seletor do curso libera o curso inteiro. Um módulo ou material pode ficar em “Herdar” ou receber uma exceção. A tela sempre mostra de onde vem a permissão efetiva.</p>
+</div>

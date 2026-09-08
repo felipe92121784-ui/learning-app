@@ -1,0 +1,49 @@
+<h2>Detalhes do aluno</h2>
+<p class="subtitle">Proposta para concentrar cursos, períodos e permissões em uma tela dedicada.</p>
+
+<div class="section" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,360px);gap:24px;align-items:start">
+  <div class="mockup" data-choice="detail-page" onclick="toggleSelect(this)">
+    <div class="mockup-header">Administração / Usuários / Cristian</div>
+    <div class="mockup-body" style="padding:28px;background:#fafafa">
+      <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:24px">
+        <div style="display:flex;gap:14px;align-items:center">
+          <div style="width:48px;height:48px;border-radius:50%;background:#e8edf4;display:grid;place-items:center;font-weight:700;color:#334155">CR</div>
+          <div><div style="font-size:20px;font-weight:700">Cristian</div><div style="color:#64748b;font-size:14px">cristian@exemplo.com · Aluno ativo</div></div>
+        </div>
+        <button class="mock-button">Adicionar curso</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px">
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:white"><div class="label">Cursos ativos</div><strong style="font-size:22px">2</strong></div>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:white"><div class="label">Próximo vencimento</div><strong style="font-size:14px">12 set 2027</strong></div>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:white"><div class="label">Último acesso</div><strong style="font-size:14px">Hoje</strong></div>
+      </div>
+      <h3 style="margin:0 0 12px">Cursos atribuídos</h3>
+      <div style="display:grid;gap:12px">
+        <div style="border:1px solid #dbe3ee;border-radius:12px;padding:16px;background:white;display:flex;justify-content:space-between;gap:16px">
+          <div><strong>Eletrônica Agrícola</strong><div style="color:#64748b;font-size:13px;margin-top:5px">12 set 2026 — 12 set 2027 · Leitura</div><span style="display:inline-block;margin-top:10px;padding:3px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:12px">Ativo</span></div>
+          <button class="mock-button" style="background:#fff;color:#111;border:1px solid #cbd5e1">Permissões</button>
+        </div>
+        <div style="border:1px solid #dbe3ee;border-radius:12px;padding:16px;background:white;display:flex;justify-content:space-between;gap:16px">
+          <div><strong>Segurança em Redes</strong><div style="color:#64748b;font-size:13px;margin-top:5px">01 mar 2026 — 01 mar 2027 · Total</div><span style="display:inline-block;margin-top:10px;padding:3px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:12px">Expira em 12 dias</span></div>
+          <button class="mock-button" style="background:#fff;color:#111;border:1px solid #cbd5e1">Permissões</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>Página dedicada</h3><p>Recomendação: visão completa do aluno, com cards de curso e período visível sem abrir modal.</p></div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Adicionar curso</div>
+    <div class="mockup-body" style="padding:22px;background:#fff">
+      <div class="label">Curso</div>
+      <div class="mock-input" style="margin:7px 0 18px">Eletrônica Agrícola</div>
+      <div class="label">Permissão inicial</div>
+      <div style="display:flex;border:1px solid #dbe3ee;border-radius:8px;overflow:hidden;margin:7px 0 18px"><div style="padding:10px;flex:1;text-align:center;border-right:1px solid #dbe3ee">Sem acesso</div><div style="padding:10px;flex:1;text-align:center;background:#111;color:white">Leitura</div><div style="padding:10px;flex:1;text-align:center">Total</div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><div class="label">Início</div><div class="mock-input" style="margin-top:7px">Hoje</div></div><div><div class="label">Término</div><div class="mock-input" style="margin-top:7px">Daqui a 1 ano</div></div></div>
+      <p style="font-size:13px;color:#64748b;margin:16px 0">As datas já vêm preenchidas, mas podem ser ajustadas antes de salvar.</p>
+      <button class="mock-button" style="width:100%">Adicionar ao aluno</button>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle">Clique na proposta “Página dedicada” se este fluxo representa o que você imaginou.</p>

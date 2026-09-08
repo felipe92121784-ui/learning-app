@@ -93,6 +93,31 @@ export class CourseSchema extends BaseModel {
   declare updatedAt: DateTime | null
 }
 
+export class ImageTileManifestSchema extends BaseModel {
+  static $columns = ['createdAt', 'height', 'id', 'materialId', 'maxLevel', 'minLevel', 'storagePrefix', 'tileSize', 'updatedAt', 'width'] as const
+  $columns = ImageTileManifestSchema.$columns
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare height: number
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare materialId: number
+  @column()
+  declare maxLevel: number
+  @column()
+  declare minLevel: number
+  @column()
+  declare storagePrefix: string
+  @column()
+  declare tileSize: number
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+  @column()
+  declare width: number
+}
+
 export class MaterialDerivativeSchema extends BaseModel {
   static $columns = ['createdAt', 'height', 'id', 'kind', 'materialId', 'mimeType', 'pageNumber', 'position', 'storageKey', 'updatedAt', 'width'] as const
   $columns = MaterialDerivativeSchema.$columns
@@ -201,6 +226,31 @@ export class ProcessingJobSchema extends BaseModel {
   declare pendingCleanupKeys: any | null
   @column()
   declare status: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
+export class StorageCleanupTaskSchema extends BaseModel {
+  static $columns = ['attempts', 'claimToken', 'createdAt', 'id', 'leaseExpiresAt', 'lockedAt', 'nextAttemptAt', 'objectKeys', 'storagePrefixes', 'updatedAt'] as const
+  $columns = StorageCleanupTaskSchema.$columns
+  @column()
+  declare attempts: number
+  @column()
+  declare claimToken: string | null
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column({ isPrimary: true })
+  declare id: number
+  @column.dateTime()
+  declare leaseExpiresAt: DateTime | null
+  @column.dateTime()
+  declare lockedAt: DateTime | null
+  @column.dateTime()
+  declare nextAttemptAt: DateTime
+  @column()
+  declare objectKeys: any
+  @column()
+  declare storagePrefixes: any
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   declare updatedAt: DateTime | null
 }
