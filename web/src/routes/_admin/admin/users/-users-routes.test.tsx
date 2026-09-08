@@ -203,6 +203,11 @@ describe('administrative user routes', () => {
     expect(await screen.findByRole('heading', { name: 'Ada Student' })).toBeTruthy()
     expect(screen.getByText('Fundamentos de redes')).toBeTruthy()
 
+    fireEvent.click(screen.getByRole('button', { name: 'Editar aluno' }))
+    expect(await screen.findByRole('dialog', { name: 'Editar aluno' })).toBeTruthy()
+    expect(screen.queryByText('Salvar alterações')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
     fireEvent.click(screen.getByRole('button', { name: 'Adicionar curso' }))
     expect(await screen.findByRole('dialog', { name: 'Adicionar curso' })).toBeTruthy()
   })

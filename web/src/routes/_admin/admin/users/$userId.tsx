@@ -1,15 +1,15 @@
 /* eslint-disable react/only-export-components */
 import { useState } from 'react'
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { EditUserForm } from '@/features/users/user-form'
 import {
   useUpdateUserMutation,
@@ -57,14 +57,14 @@ function EditUserRouteError() {
 function EditUserPage() {
   const { userId: userIdParam } = Route.useParams()
   const userId = Number(userIdParam)
-  const navigate = useNavigate()
   const userQuery = useUserQuery(userId)
   const updateMutation = useUpdateUserMutation()
+  const [editOpen, setEditOpen] = useState(false)
 
   function handleSubmit(input: UpdateUserInput) {
     updateMutation.mutate(
       { userId, input },
-      { onSuccess: () => void navigate({ to: '/admin/users' }) },
+      { onSuccess: () => setEditOpen(false) },
     )
   }
 
@@ -90,16 +90,16 @@ function EditUserPage() {
         </Alert>
       ) : (
         <div className="space-y-8">
-          <StudentCourseDetails student={userQuery.data} />
+          <StudentCourseDetails onEdit={() => setEditOpen(true)} student={userQuery.data} />
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Editar aluno</CardTitle>
-              <CardDescription>
-                Altere o nome ou e-mail. A senha é gerenciada pelo próprio aluno.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+          <Dialog open={editOpen} onOpenChange={setEditOpen}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Editar aluno</DialogTitle>
+                <DialogDescription>
+                  Altere o nome ou e-mail. A senha é gerenciada pelo próprio aluno.
+                </DialogDescription>
+              </DialogHeader>
               <EditUserForm
                 error={
                   updateMutation.isError
@@ -110,8 +110,8 @@ function EditUserPage() {
                 user={userQuery.data}
                 onSubmit={handleSubmit}
               />
-            </CardContent>
-          </Card>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
     </main>
@@ -120,8 +120,10 @@ function EditUserPage() {
 
 function StudentCourseDetails({
   student,
+  onEdit,
 }: {
   student: NonNullable<ReturnType<typeof useUserQuery>['data']>
+  onEdit: () => void
 }) {
   const associationsQuery = useStudentCourseAssociationsQuery(student.id)
   const [addCourseOpen, setAddCourseOpen] = useState(false)
@@ -131,6 +133,7 @@ function StudentCourseDetails({
     <>
       <StudentProfileCard
         courseCount={associationsQuery.data?.length ?? 0}
+        onEdit={onEdit}
         student={student}
       />
 

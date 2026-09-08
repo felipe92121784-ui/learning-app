@@ -1,9 +1,18 @@
 import type { ManagedUser } from './users-types'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { formatEnrollmentDate } from './enrollment-period'
 
-export function StudentProfileCard({ student, courseCount }: { student: ManagedUser; courseCount: number }) {
+export function StudentProfileCard({
+  student,
+  courseCount,
+  onEdit,
+}: {
+  student: ManagedUser
+  courseCount: number
+  onEdit?: () => void
+}) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-5 sm:flex-row sm:items-center">
@@ -23,6 +32,11 @@ export function StudentProfileCard({ student, courseCount }: { student: ManagedU
             <div><dt className="text-muted-foreground">Cursos atribuídos</dt><dd>{courseCount} {courseCount === 1 ? 'curso' : 'cursos'}</dd></div>
           </dl>
         </div>
+        {onEdit ? (
+          <Button className="shrink-0 max-sm:w-full" onClick={onEdit} type="button" variant="outline">
+            Editar aluno
+          </Button>
+        ) : null}
       </CardContent>
     </Card>
   )
