@@ -1,4 +1,5 @@
 import AccessRule from '#models/access_rule'
+import Course from '#models/course'
 import CourseModule from '#models/course_module'
 import Material from '#models/material'
 import User from '#models/user'
@@ -13,6 +14,7 @@ import {
 } from '#validators/access_rule'
 import type { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db'
+import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
 import { DateTime } from 'luxon'
 
 export default class AccessRulesController {
@@ -39,31 +41,32 @@ export default class AccessRulesController {
     const window = parseAccessRuleWindow(payload.startsAt, payload.expiresAt)
     await this.ensureStudent(payload.userId)
     await this.ensureTarget(payload)
-    await this.ensureChildTargetHasCourseAssociation(payload.userId, payload)
-
-    const now = DateTime.utc().toSQL()!
-    const [row] = await db
-      .table('access_rules')
-      .insert({
-        user_id: payload.userId,
-        resource_type: payload.resourceType,
-        resource_id: payload.resourceId,
-        capability: payload.capability,
-        effect: payload.effect,
-        starts_at: window.startsAt?.toSQL() ?? null,
-        expires_at: window.expiresAt?.toSQL() ?? null,
-        created_at: now,
-        updated_at: now,
-      })
-      .onConflict(['user_id', 'resource_type', 'resource_id', 'capability'])
-      .merge({
-        effect: payload.effect,
-        starts_at: window.startsAt?.toSQL() ?? null,
-        expires_at: window.expiresAt?.toSQL() ?? null,
-        updated_at: now,
-      })
-      .returning('id')
-    const rule = await AccessRule.findOrFail(row.id)
+    const rule = await db.transaction(async (trx) => {
+      await this.ensureChildTargetHasCourseAssociation(payload.userId, payload, trx)
+      const now = DateTime.utc().toSQL()!
+      const [row] = await trx
+        .table('access_rules')
+        .insert({
+          user_id: payload.userId,
+          resource_type: payload.resourceType,
+          resource_id: payload.resourceId,
+          capability: payload.capability,
+          effect: payload.effect,
+          starts_at: window.startsAt?.toSQL() ?? null,
+          expires_at: window.expiresAt?.toSQL() ?? null,
+          created_at: now,
+          updated_at: now,
+        })
+        .onConflict(['user_id', 'resource_type', 'resource_id', 'capability'])
+        .merge({
+          effect: payload.effect,
+          starts_at: window.startsAt?.toSQL() ?? null,
+          expires_at: window.expiresAt?.toSQL() ?? null,
+          updated_at: now,
+        })
+        .returning('id')
+      return AccessRule.findOrFail(row.id, { client: trx })
+    })
 
     return serialize(AccessRuleTransformer.transform(rule))
   }
@@ -119,12 +122,15 @@ export default class AccessRulesController {
     target: {
       resourceType: 'COURSE' | 'MODULE' | 'MATERIAL'
       resourceId: number
-    }
+    },
+    trx: TransactionClientContract
   ) {
     const courseId = await this.courseIdForChildTarget(target)
     if (!courseId) return
 
-    const association = await AccessRule.query()
+    // Serialize association validation and child writes with course removal.
+    await Course.query({ client: trx }).where('id', courseId).forUpdate().firstOrFail()
+    const association = await AccessRule.query({ client: trx })
       .where({ userId, resourceType: 'COURSE', resourceId: courseId })
       .first()
 

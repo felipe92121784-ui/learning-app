@@ -52,8 +52,14 @@ function permissionFromEffects(view: boolean, download: boolean): CoursePermissi
 }
 
 function directEffects(rules: AccessRule[]): Partial<Record<'VIEW' | 'DOWNLOAD', AccessEffect>> {
+  const now = Date.now()
   return Object.fromEntries(
-    rules.map((rule) => [rule.capability, rule.effect]),
+    rules
+      .filter((rule) =>
+        (!rule.startsAt || Date.parse(rule.startsAt) <= now) &&
+        (!rule.expiresAt || now < Date.parse(rule.expiresAt)),
+      )
+      .map((rule) => [rule.capability, rule.effect]),
   ) as Partial<Record<'VIEW' | 'DOWNLOAD', AccessEffect>>
 }
 
@@ -198,17 +204,30 @@ function ResourcePermissionControl({
 function CourseAssociationPermissionControl({
   association,
   studentId,
+  onAssociationMissing,
 }: {
   association: StudentCourseAssociation
   studentId: number
+  onAssociationMissing: () => void
 }) {
   const update = useUpdateStudentCourseAssociationMutation()
+  const queryClient = useQueryClient()
+  const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
   async function changePermission(permission: CoursePermission) {
     setSaveError(null)
+    setIsSaving(true)
 
     try {
+      const latestAssociations = await queryClient.fetchQuery({
+        ...studentCourseAssociationsQueryOptions(studentId),
+        staleTime: 0,
+      })
+      if (!latestAssociations.some((course) => course.id === association.id)) {
+        onAssociationMissing()
+        return
+      }
       await update.mutateAsync({
         userId: studentId,
         courseId: association.id,
@@ -216,13 +235,15 @@ function CourseAssociationPermissionControl({
       })
     } catch {
       setSaveError('Não foi possível salvar a permissão do curso. Tente novamente.')
+    } finally {
+      setIsSaving(false)
     }
   }
 
   return (
     <div className="space-y-2">
       <CoursePermissionToggle
-        disabled={update.isPending}
+        disabled={isSaving || update.isPending}
         label={`Permissão para o curso ${association.title}`}
         name={`permission-${studentId}-COURSE-${association.id}`}
         onChange={(permission) => void changePermission(permission)}
@@ -345,7 +366,11 @@ function CoursePermissionTree({
             A regra do curso é o padrão para os itens abaixo sem exceção direta.
           </p>
         </div>
-        <CourseAssociationPermissionControl association={association} studentId={studentId} />
+        <CourseAssociationPermissionControl
+          association={association}
+          studentId={studentId}
+          onAssociationMissing={onAssociationMissing}
+        />
       </div>
       {course.data.modules.length === 0 ? (
         <p className="text-sm text-muted-foreground">Este curso ainda não possui módulos.</p>
@@ -575,7 +600,10 @@ export function StudentCoursePermissionsDialog({
                       <CoursePermissionTree
                         association={course}
                         studentId={student.id}
-                        onAssociationMissing={() => setConfiguredCourseId(null)}
+                        onAssociationMissing={() => {
+                          setConfiguredCourseId(null)
+                          setError('Este curso não está mais atribuído ao aluno.')
+                        }}
                       />
                     </div>
                   ) : null}

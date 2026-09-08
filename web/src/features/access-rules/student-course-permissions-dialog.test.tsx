@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StudentCoursePermissionsDialog } from './student-course-permissions-dialog'
@@ -142,7 +142,7 @@ describe('StudentCoursePermissionsDialog', () => {
     expect(screen.queryByText('Fundamentos de redes')).toBeNull()
   })
 
-  it('updates the course through its association when the course toggle changes', () => {
+  it('updates the course through its association when the course toggle changes', async () => {
     renderDialog()
 
     fireEvent.click(
@@ -150,11 +150,49 @@ describe('StudentCoursePermissionsDialog', () => {
     )
     fireEvent.click(screen.getAllByRole('radio', { name: 'Total' })[0]!)
 
-    expect(update).toHaveBeenCalledWith({
+    await waitFor(() => expect(update).toHaveBeenCalledWith({
       userId: 7,
       courseId: 9,
       permission: 'FULL',
-    })
+    }))
+  })
+
+  it('closes stale course configuration instead of reassigning a course removed by another admin', async () => {
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+    associationsState = { ...associationsState, data: [] }
+
+    fireEvent.click(screen.getAllByRole('radio', { name: 'Total' })[0]!)
+
+    expect(await screen.findByText('Este curso não está mais atribuído ao aluno.')).toBeTruthy()
+    expect(screen.queryByText('Curso: Fundamentos de redes')).toBeNull()
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it.each(['expired', 'future'])('inherits current permission when the direct rule is %s', (window) => {
+    courseState = {
+      data: { modules: [{ id: 31, title: 'Módulo 1', description: null }] },
+      isPending: false,
+    }
+    const now = Date.now()
+    directRulesState = {
+      data: [{
+        id: 1, userId: 7, resourceType: 'MODULE', resourceId: 31,
+        capability: 'VIEW', effect: 'DENY',
+        startsAt: window === 'future' ? new Date(now + 3600000).toISOString() : null,
+        expiresAt: window === 'expired' ? new Date(now - 3600000).toISOString() : null,
+        createdAt: new Date(now - 7200000).toISOString(), updatedAt: null,
+      }],
+      isPending: false,
+      isError: false,
+    }
+
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+
+    expect((screen.getAllByRole('radio', { name: 'Leitura' })[1] as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByText('Herdado do curso')).toBeTruthy()
+    expect(screen.queryByText('Exceção direta parcial neste item.')).toBeNull()
   })
 
   it('blocks a child toggle when its direct or effective access cannot be loaded', () => {

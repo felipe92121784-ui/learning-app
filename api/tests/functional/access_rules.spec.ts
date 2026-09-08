@@ -466,6 +466,56 @@ test.group('Administrative access rule API', (group) => {
     }
   })
 
+  test('does not leave child rules after a concurrent course association removal', async ({
+    client,
+    assert,
+  }) => {
+    const session = await login(client, admin)
+    await AccessRule.create({
+      userId: student.id,
+      resourceType: 'COURSE',
+      resourceId: course.id,
+      capability: 'VIEW',
+      effect: 'ALLOW',
+    })
+    const remover = await db.transaction()
+    let requestFinished = false
+    try {
+      // Hold the same lock and deletion used by association removal, before commit.
+      await Course.query({ client: remover }).where('id', course.id).forUpdate().firstOrFail()
+      await AccessRule.query({ client: remover }).where('userId', student.id).delete()
+      const pendingWrite = Promise.resolve(
+        withCsrf(client.put('/api/v1/access-rules'), session).unsafeJson({
+          userId: student.id,
+          resourceType: 'MODULE',
+          resourceId: module.id,
+          capability: 'VIEW',
+          effect: 'ALLOW',
+          startsAt: null,
+          expiresAt: null,
+        })
+      ).then((response) => {
+        requestFinished = true
+        return response
+      })
+
+      // Wait for the real request to finish (bug) or to wait on the course lock (fixed).
+      for (let attempt = 0; attempt < 100 && !requestFinished; attempt++) {
+        const result = await db.rawQuery(
+          "SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%courses%'"
+        )
+        if (result.rows.length > 0) break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      await remover.commit()
+      const response = await pendingWrite
+      response.assertStatus(422)
+      assert.lengthOf(await AccessRule.query().where('userId', student.id), 0)
+    } finally {
+      if (!remover.isCompleted) await remover.rollback()
+    }
+  })
+
   test('only an authenticated admin with CSRF can administer rules or inspect effective access', async ({
     client,
   }) => {
