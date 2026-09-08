@@ -2,26 +2,61 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StudentCoursePermissionsDialog } from './student-course-permissions-dialog'
 
 const update = vi.fn()
 const remove = vi.fn()
+const upsertRule = vi.fn()
 
-vi.mock('./student-course-associations-queries', () => ({
-  useStudentCourseAssociationsQuery: () => ({
-    data: [
-      {
-        id: 9,
-        title: 'Fundamentos de redes',
-        description: 'Introdução',
-        status: 'PUBLISHED',
-        permission: 'READ',
-        createdAt: '2026-09-07T00:00:00.000Z',
-        updatedAt: null,
-      },
-    ],
+const assignedCourse = {
+  id: 9,
+  title: 'Fundamentos de redes',
+  description: 'Introdução',
+  status: 'PUBLISHED',
+  permission: 'READ' as const,
+  createdAt: '2026-09-07T00:00:00.000Z',
+  updatedAt: null,
+}
+
+let associationsState: {
+  data: typeof assignedCourse[] | undefined
+  isPending: boolean
+  isError: boolean
+  isSuccess: boolean
+}
+let associationResponses: typeof associationsState[]
+let courseState: { data: { modules: unknown[] } | undefined; isPending: boolean; isError?: boolean }
+let directRulesState: { data: unknown[] | undefined; isPending: boolean; isError: boolean }
+let effectiveAccessState: { data: unknown; isPending: boolean; isError: boolean }
+
+function resetStates() {
+  associationsState = {
+    data: [assignedCourse],
     isPending: false,
     isError: false,
+    isSuccess: true,
+  }
+  associationResponses = []
+  courseState = { data: { modules: [] }, isPending: false }
+  directRulesState = { data: [], isPending: false, isError: false }
+  effectiveAccessState = {
+    data: {
+      view: { allowed: true, source: 'COURSE' },
+      download: { allowed: false, source: 'COURSE' },
+    },
+    isPending: false,
+    isError: false,
+  }
+}
+
+resetStates()
+
+vi.mock('./student-course-associations-queries', () => ({
+  useStudentCourseAssociationsQuery: () => associationResponses.shift() ?? associationsState,
+  studentCourseAssociationsQueryOptions: (userId: number) => ({
+    queryKey: ['student-course-associations', 'list', userId],
+    queryFn: async () => associationsState.data ?? [],
   }),
   useUpdateStudentCourseAssociationMutation: () => ({
     mutateAsync: update,
@@ -47,7 +82,7 @@ vi.mock('@/features/courses/courses-queries', () => ({
     ],
     isPending: false,
   }),
-  useCourseQuery: () => ({ data: { modules: [] }, isPending: false }),
+  useCourseQuery: () => courseState,
 }))
 
 vi.mock('@/features/materials/materials-queries', () => ({
@@ -55,26 +90,39 @@ vi.mock('@/features/materials/materials-queries', () => ({
 }))
 
 vi.mock('./access-rules-queries', () => ({
-  useAccessRulesQuery: () => ({ data: [], isPending: false }),
-  useEffectiveAccessQuery: () => ({ data: null, isPending: false }),
-  useUpsertAccessRuleMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  accessRulesQueryKeys: { all: ['access-rules'] },
+  useAccessRulesQuery: () => directRulesState,
+  useEffectiveAccessQuery: () => effectiveAccessState,
+  useUpsertAccessRuleMutation: () => ({ mutateAsync: upsertRule, isPending: false }),
 }))
+
+function renderDialog() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <StudentCoursePermissionsDialog
+        open
+        onOpenChange={vi.fn()}
+        student={{ id: 7, fullName: 'Ada Aluna' }}
+      />
+    </QueryClientProvider>,
+  )
+}
 
 describe('StudentCoursePermissionsDialog', () => {
   afterEach(() => {
     cleanup()
     update.mockReset()
     remove.mockReset()
+    upsertRule.mockReset()
+    resetStates()
   })
 
   it('shows only assigned courses first and exposes course management actions', () => {
-    render(
-      <StudentCoursePermissionsDialog
-        open
-        onOpenChange={vi.fn()}
-        student={{ id: 7, fullName: 'Ada Aluna' }}
-      />,
-    )
+    renderDialog()
 
     expect(screen.getByRole('dialog', { name: 'Cursos e permissões' })).toBeTruthy()
     expect(screen.getByText('Fundamentos de redes')).toBeTruthy()
@@ -85,13 +133,7 @@ describe('StudentCoursePermissionsDialog', () => {
   })
 
   it('opens a searchable course selector without showing assigned courses again', () => {
-    render(
-      <StudentCoursePermissionsDialog
-        open
-        onOpenChange={vi.fn()}
-        student={{ id: 7, fullName: 'Ada Aluna' }}
-      />,
-    )
+    renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: 'Adicionar curso' }))
 
@@ -101,13 +143,7 @@ describe('StudentCoursePermissionsDialog', () => {
   })
 
   it('updates the course through its association when the course toggle changes', () => {
-    render(
-      <StudentCoursePermissionsDialog
-        open
-        onOpenChange={vi.fn()}
-        student={{ id: 7, fullName: 'Ada Aluna' }}
-      />,
-    )
+    renderDialog()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }),
@@ -119,5 +155,78 @@ describe('StudentCoursePermissionsDialog', () => {
       courseId: 9,
       permission: 'FULL',
     })
+  })
+
+  it('blocks a child toggle when its direct or effective access cannot be loaded', () => {
+    courseState = {
+      data: {
+        modules: [{ id: 31, title: 'Módulo 1', description: null }],
+      },
+      isPending: false,
+    }
+    directRulesState = { data: undefined, isPending: false, isError: true }
+
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+
+    expect(screen.getByText('Não foi possível carregar as regras de acesso deste item.')).toBeTruthy()
+    expect(screen.getAllByRole('radio', { name: 'Leitura' })[1]?.matches(':disabled')).toBe(true)
+    expect(screen.queryByText('Aplicando o padrão da plataforma')).toBeNull()
+  })
+
+  it('identifies a partial direct override instead of presenting it as inherited', () => {
+    courseState = {
+      data: {
+        modules: [{ id: 31, title: 'Módulo 1', description: null }],
+      },
+      isPending: false,
+    }
+    directRulesState = {
+      data: [
+        { capability: 'VIEW', effect: 'INHERIT' },
+        { capability: 'DOWNLOAD', effect: 'DENY' },
+      ],
+      isPending: false,
+      isError: false,
+    }
+
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+
+    expect(screen.getByText('Exceção direta parcial neste item.')).toBeTruthy()
+  })
+
+  it('blocks a child toggle when the course is no longer associated with the student', () => {
+    courseState = {
+      data: {
+        modules: [{ id: 31, title: 'Módulo 1', description: null }],
+      },
+      isPending: false,
+    }
+    associationResponses = [
+      associationsState,
+      associationsState,
+      { data: [], isPending: false, isError: false, isSuccess: true },
+    ]
+
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+
+    expect(screen.getByText('Este curso não está mais atribuído ao aluno.')).toBeTruthy()
+    expect(screen.getAllByRole('radio', { name: 'Leitura' })[1]?.matches(':disabled')).toBe(true)
+  })
+
+  it('blocks course selection when assigned courses cannot be loaded', () => {
+    associationsState = {
+      data: undefined,
+      isPending: false,
+      isError: true,
+      isSuccess: false,
+    }
+
+    renderDialog()
+
+    expect(screen.getByText('Não foi possível carregar os cursos atribuídos.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Adicionar curso' }).hasAttribute('disabled')).toBe(true)
   })
 })

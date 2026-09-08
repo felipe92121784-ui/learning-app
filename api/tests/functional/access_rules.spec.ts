@@ -362,6 +362,22 @@ test.group('Administrative access rule API', (group) => {
     assert,
     client,
   }) => {
+    await AccessRule.createMany([
+      {
+        userId: student.id,
+        resourceType: 'COURSE',
+        resourceId: course.id,
+        capability: 'VIEW',
+        effect: 'ALLOW',
+      },
+      {
+        userId: student.id,
+        resourceType: 'COURSE',
+        resourceId: course.id,
+        capability: 'DOWNLOAD',
+        effect: 'DENY',
+      },
+    ])
     const session = await login(client, admin)
     const startsAt = '2026-09-06T12:00:00.000Z'
     const expiresAt = '2026-09-07T12:00:00.000Z'
@@ -426,6 +442,28 @@ test.group('Administrative access rule API', (group) => {
     )
     deleteResponse.assertStatus(204)
     assert.isNull(await AccessRule.find(createResponse.body().data.id))
+  })
+
+  test('rejects module and material rules when the student is not associated with their course', async ({
+    client,
+  }) => {
+    const session = await login(client, admin)
+
+    for (const target of [
+      { resourceType: 'MODULE' as const, resourceId: module.id },
+      { resourceType: 'MATERIAL' as const, resourceId: material.id },
+    ]) {
+      const response = await withCsrf(client.put('/api/v1/access-rules'), session).unsafeJson({
+        userId: student.id,
+        ...target,
+        capability: 'VIEW',
+        effect: 'ALLOW',
+        startsAt: null,
+        expiresAt: null,
+      })
+
+      response.assertStatus(422)
+    }
   })
 
   test('only an authenticated admin with CSRF can administer rules or inspect effective access', async ({

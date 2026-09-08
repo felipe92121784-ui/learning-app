@@ -1,4 +1,6 @@
 import AccessRule from '#models/access_rule'
+import CourseModule from '#models/course_module'
+import Material from '#models/material'
 import User from '#models/user'
 import AccessControlService, { AccessResourceNotFoundError } from '#services/access_control_service'
 import AccessRuleTransformer from '#transformers/access_rule_transformer'
@@ -37,6 +39,7 @@ export default class AccessRulesController {
     const window = parseAccessRuleWindow(payload.startsAt, payload.expiresAt)
     await this.ensureStudent(payload.userId)
     await this.ensureTarget(payload)
+    await this.ensureChildTargetHasCourseAssociation(payload.userId, payload)
 
     const now = DateTime.utc().toSQL()!
     const [row] = await db
@@ -109,5 +112,43 @@ export default class AccessRulesController {
 
       throw error
     }
+  }
+
+  private async ensureChildTargetHasCourseAssociation(
+    userId: number,
+    target: {
+      resourceType: 'COURSE' | 'MODULE' | 'MATERIAL'
+      resourceId: number
+    }
+  ) {
+    const courseId = await this.courseIdForChildTarget(target)
+    if (!courseId) return
+
+    const association = await AccessRule.query()
+      .where({ userId, resourceType: 'COURSE', resourceId: courseId })
+      .first()
+
+    if (!association) {
+      throw fieldError(
+        'resourceId',
+        'The resourceId field must belong to a course currently assigned to the student'
+      )
+    }
+  }
+
+  private async courseIdForChildTarget(target: {
+    resourceType: 'COURSE' | 'MODULE' | 'MATERIAL'
+    resourceId: number
+  }): Promise<number | null> {
+    if (target.resourceType === 'COURSE') return null
+
+    if (target.resourceType === 'MODULE') {
+      const module = await CourseModule.findOrFail(target.resourceId)
+      return module.courseId
+    }
+
+    const material = await Material.findOrFail(target.resourceId)
+    const module = await CourseModule.findOrFail(material.moduleId)
+    return module.courseId
   }
 }

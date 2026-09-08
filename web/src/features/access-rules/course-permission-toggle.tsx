@@ -10,7 +10,7 @@ const permissionLabels: Record<CoursePermission, string> = {
 
 interface CoursePermissionToggleProps {
   label: string
-  value: CoursePermission
+  value: CoursePermission | null
   onChange: (permission: CoursePermission) => void
   disabled?: boolean
   name?: string

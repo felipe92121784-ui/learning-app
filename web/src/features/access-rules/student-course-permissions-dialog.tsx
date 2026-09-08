@@ -27,6 +27,7 @@ import {
   accessRulesQueryKeys,
 } from './access-rules-queries'
 import type {
+  AccessEffect,
   AccessResource,
   AccessRule,
   EffectiveAccess,
@@ -35,6 +36,7 @@ import {
   useDeleteStudentCourseAssociationMutation,
   useStudentCourseAssociationsQuery,
   useUpdateStudentCourseAssociationMutation,
+  studentCourseAssociationsQueryOptions,
 } from './student-course-associations-queries'
 import type { StudentCourseAssociation } from './student-course-associations-types'
 
@@ -49,17 +51,28 @@ function permissionFromEffects(view: boolean, download: boolean): CoursePermissi
   return download ? 'FULL' : 'READ'
 }
 
-function directPermission(rules: AccessRule[]): CoursePermission | null {
-  const view = rules.find((rule) => rule.capability === 'VIEW')
-  const download = rules.find((rule) => rule.capability === 'DOWNLOAD')
+function directEffects(rules: AccessRule[]): Partial<Record<'VIEW' | 'DOWNLOAD', AccessEffect>> {
+  return Object.fromEntries(
+    rules.map((rule) => [rule.capability, rule.effect]),
+  ) as Partial<Record<'VIEW' | 'DOWNLOAD', AccessEffect>>
+}
 
-  if (!view || !download) return null
+function isDirectOverride(effect: AccessEffect | undefined) {
+  return effect !== undefined && effect !== 'INHERIT'
+}
 
-  if (view.effect === 'DENY' && download.effect === 'DENY') return 'NONE'
-  if (view.effect === 'ALLOW' && download.effect === 'DENY') return 'READ'
-  if (view.effect === 'ALLOW' && download.effect === 'ALLOW') return 'FULL'
+function permissionFromDirectAndEffective(
+  direct: Partial<Record<'VIEW' | 'DOWNLOAD', AccessEffect>>,
+  effective: EffectiveAccess,
+): CoursePermission {
+  const view = isDirectOverride(direct.VIEW)
+    ? direct.VIEW === 'ALLOW'
+    : effective.view.allowed
+  const download = isDirectOverride(direct.DOWNLOAD)
+    ? direct.DOWNLOAD === 'ALLOW'
+    : effective.download.allowed
 
-  return null
+  return permissionFromEffects(view, download)
 }
 
 function inheritedLabel(access: EffectiveAccess | null | undefined): string {
@@ -73,32 +86,52 @@ function inheritedLabel(access: EffectiveAccess | null | undefined): string {
 function ResourcePermissionControl({
   resource,
   studentId,
+  courseId,
+  onAssociationMissing,
 }: {
   resource: AccessResource
   studentId: number
+  courseId: number
+  onAssociationMissing: () => void
 }) {
   const target = { userId: studentId, resource }
   const directRules = useAccessRulesQuery(target)
   const effectiveAccess = useEffectiveAccessQuery(target)
+  const associations = useStudentCourseAssociationsQuery(studentId)
   const upsert = useUpsertAccessRuleMutation()
   const queryClient = useQueryClient()
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const direct = directPermission(directRules.data ?? [])
-  const inherited = effectiveAccess.data
-    ? permissionFromEffects(
-        effectiveAccess.data.view.allowed,
-        effectiveAccess.data.download.allowed,
-      )
-    : 'NONE'
-  const value = direct ?? inherited
-  const isLoading = directRules.isPending || effectiveAccess.isPending
+  const direct = directEffects(directRules.data ?? [])
+  const overrideCount = [direct.VIEW, direct.DOWNLOAD].filter(isDirectOverride).length
+  const courseIsMissing =
+    associations.isSuccess && !associations.data.some((association) => association.id === courseId)
+  const hasQueryError = directRules.isError || effectiveAccess.isError
+  const isLoading =
+    directRules.isPending ||
+    effectiveAccess.isPending ||
+    associations.isPending ||
+    associations.isError ||
+    courseIsMissing
+  const value =
+    !hasQueryError && effectiveAccess.data
+      ? permissionFromDirectAndEffective(direct, effectiveAccess.data)
+      : null
 
   async function changePermission(permission: CoursePermission) {
     setSaveError(null)
     const rules = coursePermissionRules(permission)
 
     try {
+      const latestAssociations = await queryClient.fetchQuery(
+        studentCourseAssociationsQueryOptions(studentId),
+      )
+      if (!latestAssociations.some((association) => association.id === courseId)) {
+        onAssociationMissing()
+        setSaveError('Este curso não está mais atribuído ao aluno.')
+        return
+      }
+
       await Promise.all([
         upsert.mutateAsync({
           userId: studentId,
@@ -128,15 +161,31 @@ function ResourcePermissionControl({
   return (
     <div className="space-y-2">
       <CoursePermissionToggle
-        disabled={isLoading || upsert.isPending}
+        disabled={isLoading || hasQueryError || upsert.isPending || value === null}
         label={`Permissão para ${resource.type.toLowerCase()} ${resource.id}`}
         name={`permission-${studentId}-${resource.type}-${resource.id}`}
         onChange={(permission) => void changePermission(permission)}
         value={value}
       />
-      <p className="text-xs text-muted-foreground">
-        {direct ? 'Exceção direta neste item.' : inheritedLabel(effectiveAccess.data)}
-      </p>
+      {hasQueryError ? (
+        <p className="text-xs text-destructive">
+          Não foi possível carregar as regras de acesso deste item.
+        </p>
+      ) : associations.isError ? (
+        <p className="text-xs text-destructive">
+          Não foi possível confirmar o curso atribuído deste aluno.
+        </p>
+      ) : courseIsMissing ? (
+        <p className="text-xs text-destructive">Este curso não está mais atribuído ao aluno.</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {overrideCount > 0
+            ? overrideCount === 1
+              ? 'Exceção direta parcial neste item.'
+              : 'Exceção direta neste item.'
+            : inheritedLabel(effectiveAccess.data)}
+        </p>
+      )}
       {saveError ? (
         <Alert variant="destructive">
           <AlertDescription>{saveError}</AlertDescription>
@@ -192,9 +241,13 @@ function CourseAssociationPermissionControl({
 function MaterialPermissionRow({
   material,
   studentId,
+  courseId,
+  onAssociationMissing,
 }: {
   material: Material
   studentId: number
+  courseId: number
+  onAssociationMissing: () => void
 }) {
   return (
     <li className="flex flex-col gap-3 border-t py-3 pl-4 sm:flex-row sm:items-center sm:justify-between">
@@ -205,6 +258,8 @@ function MaterialPermissionRow({
       <ResourcePermissionControl
         resource={{ type: 'MATERIAL', id: material.id }}
         studentId={studentId}
+        courseId={courseId}
+        onAssociationMissing={onAssociationMissing}
       />
     </li>
   )
@@ -213,9 +268,13 @@ function MaterialPermissionRow({
 function ModulePermissionRow({
   module,
   studentId,
+  courseId,
+  onAssociationMissing,
 }: {
   module: CourseModule
   studentId: number
+  courseId: number
+  onAssociationMissing: () => void
 }) {
   const materials = useMaterialsQuery(module.id)
 
@@ -231,6 +290,8 @@ function ModulePermissionRow({
         <ResourcePermissionControl
           resource={{ type: 'MODULE', id: module.id }}
           studentId={studentId}
+          courseId={courseId}
+          onAssociationMissing={onAssociationMissing}
         />
       </div>
       {materials.isPending ? (
@@ -246,6 +307,8 @@ function ModulePermissionRow({
               key={material.id}
               material={material}
               studentId={studentId}
+              courseId={courseId}
+              onAssociationMissing={onAssociationMissing}
             />
           ))}
         </ul>
@@ -257,9 +320,11 @@ function ModulePermissionRow({
 function CoursePermissionTree({
   association,
   studentId,
+  onAssociationMissing,
 }: {
   association: StudentCourseAssociation
   studentId: number
+  onAssociationMissing: () => void
 }) {
   const course = useCourseQuery(association.id)
 
@@ -287,7 +352,13 @@ function CoursePermissionTree({
       ) : (
         <ul className="space-y-3">
           {course.data.modules.map((module) => (
-            <ModulePermissionRow key={module.id} module={module} studentId={studentId} />
+            <ModulePermissionRow
+              key={module.id}
+              module={module}
+              studentId={studentId}
+              courseId={association.id}
+              onAssociationMissing={onAssociationMissing}
+            />
           ))}
         </ul>
       )}
@@ -312,9 +383,12 @@ export function StudentCoursePermissionsDialog({
   const [search, setSearch] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  const assigned = associations.data ?? []
+  const associationsReady = associations.isSuccess
+  const assigned = associationsReady ? associations.data : []
   const availableCourses = useMemo(() => {
-    const assignedIds = new Set((associations.data ?? []).map((course) => course.id))
+    if (!associationsReady) return []
+
+    const assignedIds = new Set(associations.data.map((course) => course.id))
     const normalizedSearch = search.trim().toLocaleLowerCase('pt-BR')
 
     return (courses.data ?? []).filter(
@@ -322,10 +396,10 @@ export function StudentCoursePermissionsDialog({
         !assignedIds.has(course.id) &&
         course.title.toLocaleLowerCase('pt-BR').includes(normalizedSearch),
     )
-  }, [associations.data, courses.data, search])
+  }, [associations.data, associationsReady, courses.data, search])
 
   async function addCourse() {
-    if (!selectedCourseId) return
+    if (!selectedCourseId || !associationsReady) return
     setError(null)
 
     try {
@@ -423,7 +497,7 @@ export function StudentCoursePermissionsDialog({
               value={newPermission}
             />
             <Button
-              disabled={!selectedCourseId || updateAssociation.isPending}
+              disabled={!associationsReady || !selectedCourseId || updateAssociation.isPending}
               onClick={() => void addCourse()}
               type="button"
             >
@@ -439,7 +513,11 @@ export function StudentCoursePermissionsDialog({
                   Configure exceções apenas quando o aluno precisar fugir da regra do curso.
                 </p>
               </div>
-              <Button onClick={() => setSelectionOpen(true)} type="button">
+              <Button
+                disabled={!associationsReady}
+                onClick={() => setSelectionOpen(true)}
+                type="button"
+              >
                 Adicionar curso
               </Button>
             </div>
@@ -448,7 +526,12 @@ export function StudentCoursePermissionsDialog({
             ) : null}
             {associations.isError ? (
               <Alert variant="destructive">
-                <AlertDescription>Não foi possível carregar os cursos atribuídos.</AlertDescription>
+                <AlertDescription className="flex items-center justify-between gap-3">
+                  <span>Não foi possível carregar os cursos atribuídos.</span>
+                  <Button onClick={() => void associations.refetch()} size="sm" type="button" variant="outline">
+                    Tentar novamente
+                  </Button>
+                </AlertDescription>
               </Alert>
             ) : null}
             {!associations.isPending && !associations.isError && assigned.length === 0 ? (
@@ -489,7 +572,11 @@ export function StudentCoursePermissionsDialog({
                   </div>
                   {configuredCourseId === course.id ? (
                     <div className="mt-4">
-                      <CoursePermissionTree association={course} studentId={student.id} />
+                      <CoursePermissionTree
+                        association={course}
+                        studentId={student.id}
+                        onAssociationMissing={() => setConfiguredCourseId(null)}
+                      />
                     </div>
                   ) : null}
                 </article>
