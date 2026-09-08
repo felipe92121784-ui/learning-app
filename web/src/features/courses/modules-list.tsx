@@ -50,34 +50,37 @@ export function ModulesList({
       ) : (
         <ol className="space-y-2">
           {orderedModules.map((module, index) => (
-            <li className="flex items-center justify-between gap-3" key={module.id}>
-              <div>
+            <li className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between" key={module.id}>
+              <div className="min-w-0">
                 <p className="font-medium">{module.title}</p>
-                {module.description ? <p>{module.description}</p> : null}
+                {module.description ? <p className="text-sm text-muted-foreground">{module.description}</p> : null}
               </div>
-              <div className="flex gap-1">
-                <Button
-                  aria-label={`Mover ${module.title} para cima`}
-                  disabled={isMutating || index === 0}
-                  onClick={() => onMove(moveModule(orderedModules, index, index - 1))}
-                  size="icon-sm"
-                  type="button"
-                  variant="outline"
-                >
-                  ↑
-                </Button>
-                <Button
-                  aria-label={`Mover ${module.title} para baixo`}
-                  disabled={isMutating || index === orderedModules.length - 1}
-                  onClick={() => onMove(moveModule(orderedModules, index, index + 1))}
-                  size="icon-sm"
-                  type="button"
-                  variant="outline"
-                >
-                  ↓
-                </Button>
+              <div className="flex flex-wrap gap-2 border-t pt-3 sm:shrink-0 sm:border-0 sm:pt-0">
+                <div className="flex gap-1">
+                  <Button
+                    aria-label={`Mover ${module.title} para cima`}
+                    disabled={isMutating || index === 0}
+                    onClick={() => onMove(moveModule(orderedModules, index, index - 1))}
+                    size="icon-sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    ↑
+                  </Button>
+                  <Button
+                    aria-label={`Mover ${module.title} para baixo`}
+                    disabled={isMutating || index === orderedModules.length - 1}
+                    onClick={() => onMove(moveModule(orderedModules, index, index + 1))}
+                    size="icon-sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    ↓
+                  </Button>
+                </div>
                 <Button
                   aria-label={`Editar ${module.title}`}
+                  className="flex-1 sm:flex-none"
                   disabled={isMutating}
                   onClick={() => onEdit(module)}
                   size="sm"
@@ -88,6 +91,7 @@ export function ModulesList({
                 </Button>
                 <Button
                   aria-label={`Excluir ${module.title}`}
+                  className="flex-1 sm:flex-none"
                   disabled={isMutating}
                   onClick={() => onDelete(module)}
                   size="sm"
