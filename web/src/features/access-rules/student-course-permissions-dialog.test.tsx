@@ -196,6 +196,22 @@ describe('StudentCoursePermissionsDialog', () => {
     }))
   })
 
+  it('keeps modules collapsed until the administrator expands one', () => {
+    courseState = {
+      data: { modules: [{ id: 31, title: 'Módulo 1', description: 'Conteúdo inicial' }] },
+      isPending: false,
+    }
+
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))
+
+    const moduleTrigger = screen.getByRole('button', { name: /Módulo: Módulo 1/ })
+    expect(moduleTrigger.getAttribute('data-state')).toBe('closed')
+
+    fireEvent.click(moduleTrigger)
+    expect(moduleTrigger.getAttribute('data-state')).toBe('open')
+  })
+
   it('closes stale course configuration instead of reassigning a course removed by another admin', async () => {
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }))

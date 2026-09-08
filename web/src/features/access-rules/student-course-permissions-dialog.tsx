@@ -2,6 +2,12 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '@/lib/api-client'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -307,41 +313,47 @@ function ModulePermissionRow({
   const materials = useMaterialsQuery(module.id)
 
   return (
-    <li className="rounded-md border p-4">
+    <AccordionItem className="rounded-md border px-4" value={String(module.id)}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <p className="font-medium">Módulo: {module.title}</p>
-          {module.description ? (
-            <p className="text-sm text-muted-foreground">{module.description}</p>
-          ) : null}
+        <AccordionTrigger className="min-w-0 flex-1 py-4 hover:no-underline">
+          <span className="min-w-0">
+            <span className="block font-medium">Módulo: {module.title}</span>
+            {module.description ? (
+              <span className="mt-1 block text-sm font-normal text-muted-foreground">{module.description}</span>
+            ) : null}
+          </span>
+        </AccordionTrigger>
+        <div className="pb-4 lg:py-4">
+          <ResourcePermissionControl
+            resource={{ type: 'MODULE', id: module.id }}
+            studentId={studentId}
+            courseId={courseId}
+            onAssociationMissing={onAssociationMissing}
+          />
         </div>
-        <ResourcePermissionControl
-          resource={{ type: 'MODULE', id: module.id }}
-          studentId={studentId}
-          courseId={courseId}
-          onAssociationMissing={onAssociationMissing}
-        />
       </div>
-      {materials.isPending ? (
-        <p className="mt-3 text-sm text-muted-foreground">Carregando materiais…</p>
-      ) : null}
-      {materials.isError ? (
-        <p className="mt-3 text-sm text-destructive">Não foi possível carregar os materiais.</p>
-      ) : null}
-      {materials.data && materials.data.length > 0 ? (
-        <ul className="mt-3 rounded-md border px-3">
-          {materials.data.map((material) => (
-            <MaterialPermissionRow
-              key={material.id}
-              material={material}
-              studentId={studentId}
-              courseId={courseId}
-              onAssociationMissing={onAssociationMissing}
-            />
-          ))}
-        </ul>
-      ) : null}
-    </li>
+      <AccordionContent className="border-t pt-3">
+        {materials.isPending ? (
+          <p className="text-sm text-muted-foreground">Carregando materiais…</p>
+        ) : null}
+        {materials.isError ? (
+          <p className="text-sm text-destructive">Não foi possível carregar os materiais.</p>
+        ) : null}
+        {materials.data && materials.data.length > 0 ? (
+          <ul className="rounded-md border px-3">
+            {materials.data.map((material) => (
+              <MaterialPermissionRow
+                key={material.id}
+                material={material}
+                studentId={studentId}
+                courseId={courseId}
+                onAssociationMissing={onAssociationMissing}
+              />
+            ))}
+          </ul>
+        ) : null}
+      </AccordionContent>
+    </AccordionItem>
   )
 }
 
@@ -382,7 +394,7 @@ function CoursePermissionTree({
       {course.data.modules.length === 0 ? (
         <p className="text-sm text-muted-foreground">Este curso ainda não possui módulos.</p>
       ) : (
-        <ul className="space-y-3">
+        <Accordion className="space-y-3" type="multiple">
           {course.data.modules.map((module) => (
             <ModulePermissionRow
               key={module.id}
@@ -392,7 +404,7 @@ function CoursePermissionTree({
               onAssociationMissing={onAssociationMissing}
             />
           ))}
-        </ul>
+        </Accordion>
       )}
     </div>
   )

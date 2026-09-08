@@ -31,7 +31,7 @@ export function CoursePermissionToggle({
       {COURSE_PERMISSIONS.map((permission) => (
         <label
           className={cn(
-            'relative flex min-w-0 flex-1 cursor-pointer items-center justify-center border-l first:border-l-0',
+            'relative flex min-w-[5.5rem] flex-1 cursor-pointer items-center justify-center border-l first:border-l-0',
             disabled && 'cursor-not-allowed opacity-50',
           )}
           key={permission}
@@ -44,7 +44,7 @@ export function CoursePermissionToggle({
             type="radio"
             value={permission}
           />
-          <span className="flex min-h-11 items-center justify-center px-2 py-2 text-center text-sm leading-tight font-medium peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-checked:bg-primary peer-checked:text-primary-foreground sm:px-3">
+          <span className="flex min-h-11 items-center justify-center px-2 py-2 text-center text-sm leading-tight font-medium whitespace-nowrap peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-checked:bg-primary peer-checked:text-primary-foreground sm:px-3">
             {permissionLabels[permission]}
           </span>
         </label>
