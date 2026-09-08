@@ -42,14 +42,14 @@ export function MaterialsList({ moduleId, materials, isLoading = false, error }:
       {remove.isError ? <Alert variant="destructive"><AlertDescription>Não foi possível remover o material.</AlertDescription></Alert> : null}
       {ordered.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum material enviado.</p> : (
         <ol className="space-y-2">
-          {ordered.map((material) => <li className="flex items-center justify-between gap-3 rounded-md border p-3" key={material.id}>
+          {ordered.map((material) => <li className="flex flex-col gap-4 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between" key={material.id}>
             <div className="min-w-0">
               <p className="font-medium">{material.title}</p>
-              <p className="text-sm text-muted-foreground">{material.originalFilename} · {materialTypeLabel(material.type)} · {formatBytes(material.size)}</p>
+              <p className="break-words text-sm text-muted-foreground">{material.originalFilename} · {materialTypeLabel(material.type)} · {formatBytes(material.size)}</p>
               {material.description ? <p className="text-sm text-muted-foreground">{material.description}</p> : null}
               {material.processingStatus === 'FAILED' ? <Alert className="mt-2" variant="destructive"><AlertDescription>Falha no processamento{material.processingErrorCode ? ` (código: ${material.processingErrorCode})` : ''}.</AlertDescription></Alert> : null}
             </div>
-            <div className="flex shrink-0 items-center gap-2"><Badge variant="secondary">{processingStatusLabel(material.processingStatus)}</Badge><Button aria-label={`Editar ${material.title}`} disabled={remove.isPending || update.isPending} onClick={() => { setEditing(material); setTitle(material.title); setDescription(material.description ?? ''); setEditValidationError(null) }} size="sm" type="button" variant="outline">Editar</Button><Button aria-label={`Excluir ${material.title}`} disabled={remove.isPending || update.isPending} onClick={() => setSelected(material)} size="sm" type="button" variant="destructive">Excluir</Button></div>
+            <div className="flex flex-wrap items-center gap-2 border-t pt-3 sm:shrink-0 sm:border-0 sm:pt-0"><Badge className="shrink-0" variant="secondary">{processingStatusLabel(material.processingStatus)}</Badge><Button aria-label={`Editar ${material.title}`} className="flex-1 sm:flex-none" disabled={remove.isPending || update.isPending} onClick={() => { setEditing(material); setTitle(material.title); setDescription(material.description ?? ''); setEditValidationError(null) }} size="sm" type="button" variant="outline">Editar</Button><Button aria-label={`Excluir ${material.title}`} className="flex-1 sm:flex-none" disabled={remove.isPending || update.isPending} onClick={() => setSelected(material)} size="sm" type="button" variant="destructive">Excluir</Button></div>
           </li>)}
         </ol>
       )}
