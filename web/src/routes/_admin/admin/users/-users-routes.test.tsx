@@ -1,6 +1,12 @@
-import { QueryClient } from '@tanstack/react-query'
-import { createMemoryHistory } from '@tanstack/react-router'
+// @vitest-environment jsdom
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createMemoryHistory, RouterProvider } from '@tanstack/react-router'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { profileQueryKey } from '@/features/auth/auth-api'
+import { AuthProvider } from '@/features/auth/auth-provider'
+import { studentCourseAssociationsQueryKeys } from '@/features/access-rules/student-course-associations-queries'
 import { usersQueryKeys } from '@/features/users/users-queries'
 import { createAppRouter } from '@/router'
 
@@ -19,8 +25,21 @@ const managedStudent = {
   updatedAt: '2026-09-03T12:00:00.000Z',
 }
 
+const association = {
+  id: 9,
+  title: 'Fundamentos de redes',
+  description: 'Introdução',
+  permission: 'READ' as const,
+  startsAt: '2026-09-08T03:00:00.000Z',
+  expiresAt: '2027-09-09T02:59:59.999Z',
+  status: 'ACTIVE' as const,
+  createdAt: '2026-09-08T12:00:00.000Z',
+  updatedAt: null,
+}
+
 describe('administrative user routes', () => {
   afterEach(() => {
+    cleanup()
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
   })
@@ -77,8 +96,21 @@ describe('administrative user routes', () => {
     ])
   })
 
-  it('preloads the selected user before rendering the edit route', async () => {
+  it('renders the selected student profile, courses and add-course dialog', async () => {
     vi.stubEnv('VITE_API_URL', 'https://api.example.test/api/v1')
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    )
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((input: string | URL) => {
@@ -96,6 +128,14 @@ describe('administrative user routes', () => {
           return Promise.resolve(Response.json({ data: managedStudent }))
         }
 
+        if (url.endsWith('/users/7/courses')) {
+          return Promise.resolve(Response.json({ data: [association] }))
+        }
+
+        if (url.endsWith('/courses')) {
+          return Promise.resolve(Response.json({ data: [] }))
+        }
+
         throw new Error(`Unexpected request: ${url}`)
       }),
     )
@@ -106,12 +146,29 @@ describe('administrative user routes', () => {
       origin: 'http://localhost',
       queryClient,
     })
+    queryClient.setQueryData(profileQueryKey, { ...student, role: 'ADMIN' })
 
     await router.load()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    )
 
     expect(router.state.location.pathname).toBe('/admin/users/7')
     expect(queryClient.getQueryData(usersQueryKeys.detail(7))).toEqual(
       managedStudent,
     )
+    expect(
+      queryClient.getQueryData(studentCourseAssociationsQueryKeys.list(7)),
+    ).toEqual([association])
+    expect(await screen.findByRole('heading', { name: 'Ada Student' })).toBeTruthy()
+    expect(screen.getByText('Fundamentos de redes')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adicionar curso' }))
+    expect(await screen.findByRole('dialog', { name: 'Adicionar curso' })).toBeTruthy()
   })
 })

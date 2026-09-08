@@ -1,9 +1,17 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from '@tanstack/react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { UsersTable } from './users-table'
-import type { ManagedUser } from './users-types'
+import type { ManagedUser, UserStatus } from './users-types'
 
 const users: ManagedUser[] = [
   {
@@ -38,22 +46,48 @@ const users: ManagedUser[] = [
   },
 ]
 
+function renderUsersTable({
+  pendingUserId = null,
+  statusError = null,
+  onStatusChange = vi.fn(),
+}: {
+  pendingUserId?: number | null
+  statusError?: string | null
+  onStatusChange?: (userId: number, status: UserStatus) => void
+} = {}) {
+  const rootRoute = createRootRoute({ component: Outlet })
+  const pageRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/',
+    component: () => (
+      <UsersTable
+        pendingUserId={pendingUserId}
+        statusError={statusError}
+        users={users}
+        onStatusChange={onStatusChange}
+      />
+    ),
+  })
+  const detailRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin/users/$userId',
+    component: () => null,
+  })
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+    routeTree: rootRoute.addChildren([pageRoute, detailRoute]),
+  })
+
+  return render(<RouterProvider router={router} />)
+}
+
 describe('UsersTable', () => {
   afterEach(cleanup)
 
-  it('renders translated status badges and actions only for students', () => {
-    const onManageCourses = vi.fn()
-    render(
-      <UsersTable
-        pendingUserId={null}
-        statusError={null}
-        users={users}
-        onStatusChange={vi.fn()}
-        onManageCourses={onManageCourses}
-      />,
-    )
+  it('links each student to their dedicated details page while retaining status actions', async () => {
+    renderUsersTable()
 
-    expect(screen.getAllByText('Ativo')).toHaveLength(2)
+    expect(await screen.findAllByText('Ativo')).toHaveLength(2)
     expect(screen.getByText('Bloqueado')).toBeTruthy()
 
     const adminRow = screen.getByRole('row', { name: /Ada Admin/ })
@@ -63,10 +97,10 @@ describe('UsersTable', () => {
     expect(
       within(activeRow).getByRole('button', { name: 'Bloquear' }),
     ).toBeTruthy()
-    fireEvent.click(
-      within(activeRow).getByRole('button', { name: 'Cursos e permissões' }),
-    )
-    expect(onManageCourses).toHaveBeenCalledWith(users[1])
+    expect(
+      within(activeRow).getByRole('link', { name: 'Ver detalhes' }).getAttribute('href'),
+    ).toBe('/admin/users/7')
+    expect(within(activeRow).queryByText('Cursos e permissões')).toBeNull()
 
     const blockedRow = screen.getByRole('row', { name: /Blocked Student/ })
     expect(
@@ -74,19 +108,11 @@ describe('UsersTable', () => {
     ).toBeTruthy()
   })
 
-  it('asks for confirmation and emits the opposite status for a student', () => {
+  it('asks for confirmation and emits the opposite status for a student', async () => {
     const onStatusChange = vi.fn()
-    render(
-      <UsersTable
-        pendingUserId={null}
-        statusError={null}
-        users={users}
-        onStatusChange={onStatusChange}
-        onManageCourses={vi.fn()}
-      />,
-    )
+    renderUsersTable({ onStatusChange })
 
-    const activeRow = screen.getByRole('row', { name: /Active Student/ })
+    const activeRow = await screen.findByRole('row', { name: /Active Student/ })
     fireEvent.click(
       within(activeRow).getByRole('button', { name: 'Bloquear' }),
     )
@@ -99,18 +125,13 @@ describe('UsersTable', () => {
     expect(onStatusChange).toHaveBeenCalledWith(7, 'BLOCKED')
   })
 
-  it('disables the pending student action and exposes a mutation error', () => {
-    render(
-      <UsersTable
-        pendingUserId={8}
-        statusError="Não foi possível alterar o status."
-        users={users}
-        onStatusChange={vi.fn()}
-        onManageCourses={vi.fn()}
-      />,
-    )
+  it('disables the pending student action and exposes a mutation error', async () => {
+    renderUsersTable({
+      pendingUserId: 8,
+      statusError: 'Não foi possível alterar o status.',
+    })
 
-    const blockedRow = screen.getByRole('row', { name: /Blocked Student/ })
+    const blockedRow = await screen.findByRole('row', { name: /Blocked Student/ })
     expect(
       within(blockedRow).getByRole('button', { name: 'Alterando…' }),
     ).toHaveProperty('disabled', true)

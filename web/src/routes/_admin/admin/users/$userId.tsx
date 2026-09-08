@@ -1,4 +1,5 @@
 /* eslint-disable react/only-export-components */
+import { useState } from 'react'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -16,12 +17,25 @@ import {
   userQueryOptions,
 } from '@/features/users/users-queries'
 import type { UpdateUserInput } from '@/features/users/users-types'
+import {
+  studentCourseAssociationsQueryOptions,
+  useStudentCourseAssociationsQuery,
+} from '@/features/access-rules/student-course-associations-queries'
+import { AddStudentCourseDialog } from '@/features/users/add-student-course-dialog'
+import { StudentCourseCards } from '@/features/users/student-course-cards'
+import { StudentProfileCard } from '@/features/users/student-profile-card'
 
 export const Route = createFileRoute('/_admin/admin/users/$userId')({
-  loader: ({ context, params }) =>
-    context.queryClient.ensureQueryData(
-      userQueryOptions(Number(params.userId)),
-    ),
+  loader: async ({ context, params }) => {
+    const userId = Number(params.userId)
+
+    await Promise.all([
+      context.queryClient.ensureQueryData(userQueryOptions(userId)),
+      context.queryClient.ensureQueryData(
+        studentCourseAssociationsQueryOptions(userId),
+      ),
+    ])
+  },
   errorComponent: EditUserRouteError,
   component: EditUserPage,
 })
@@ -43,7 +57,9 @@ function EditUserPage() {
   const userId = Number(userIdParam)
   const navigate = useNavigate()
   const userQuery = useUserQuery(userId)
+  const associationsQuery = useStudentCourseAssociationsQuery(userId)
   const updateMutation = useUpdateUserMutation()
+  const [addCourseOpen, setAddCourseOpen] = useState(false)
 
   function handleSubmit(input: UpdateUserInput) {
     updateMutation.mutate(
@@ -73,26 +89,75 @@ function EditUserPage() {
           </AlertDescription>
         </Alert>
       ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>Editar aluno</CardTitle>
-            <CardDescription>
-              Altere o nome ou e-mail. A senha é gerenciada pelo próprio aluno.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <EditUserForm
-              error={
-                updateMutation.isError
-                  ? 'Não foi possível salvar o aluno. Revise os dados e tente novamente.'
-                  : null
-              }
-              isPending={updateMutation.isPending}
-              user={userQuery.data}
-              onSubmit={handleSubmit}
-            />
-          </CardContent>
-        </Card>
+        <div className="space-y-8">
+          <StudentProfileCard
+            courseCount={associationsQuery.data?.length ?? 0}
+            student={userQuery.data}
+          />
+
+          <section aria-labelledby="student-courses-heading" className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold" id="student-courses-heading">
+                  Cursos atribuídos
+                </h2>
+                <p className="text-sm text-slate-600">
+                  Gerencie o acesso deste aluno por curso.
+                </p>
+              </div>
+              <Button
+                disabled={associationsQuery.isPending}
+                onClick={() => setAddCourseOpen(true)}
+                type="button"
+              >
+                Adicionar curso
+              </Button>
+            </div>
+
+            {associationsQuery.isPending ? (
+              <p className="text-sm text-slate-600">Carregando cursos…</p>
+            ) : associationsQuery.isError ? (
+              <Alert variant="destructive">
+                <AlertDescription>
+                  Não foi possível carregar os cursos atribuídos. Tente novamente.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <StudentCourseCards
+                associations={associationsQuery.data}
+                student={userQuery.data}
+              />
+            )}
+          </section>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Editar aluno</CardTitle>
+              <CardDescription>
+                Altere o nome ou e-mail. A senha é gerenciada pelo próprio aluno.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <EditUserForm
+                error={
+                  updateMutation.isError
+                    ? 'Não foi possível salvar o aluno. Revise os dados e tente novamente.'
+                    : null
+                }
+                isPending={updateMutation.isPending}
+                user={userQuery.data}
+                onSubmit={handleSubmit}
+              />
+            </CardContent>
+          </Card>
+
+          <AddStudentCourseDialog
+            associations={associationsQuery.data ?? []}
+            open={addCourseOpen}
+            onOpenChange={setAddCourseOpen}
+            studentId={userId}
+          />
+        </div>
       )}
     </main>
   )

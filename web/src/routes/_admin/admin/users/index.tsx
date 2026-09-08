@@ -17,8 +17,7 @@ import {
   usersQueryOptions,
 } from '@/features/users/users-queries'
 import { UsersTable } from '@/features/users/users-table'
-import { StudentCoursePermissionsDialog } from '@/features/access-rules/student-course-permissions-dialog'
-import type { ManagedUser, UserStatus } from '@/features/users/users-types'
+import type { UserStatus } from '@/features/users/users-types'
 
 type StatusFilter = 'ALL' | UserStatus
 
@@ -46,7 +45,6 @@ function UsersPage() {
   const statusMutation = useUpdateUserStatusMutation()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
   const [statusError, setStatusError] = useState<string | null>(null)
-  const [studentForCourses, setStudentForCourses] = useState<ManagedUser | null>(null)
 
   const users = (usersQuery.data ?? []).filter(
     (user) => statusFilter === 'ALL' || user.status === statusFilter,
@@ -115,17 +113,9 @@ function UsersPage() {
             onStatusChange={(userId, status) =>
               void handleStatusChange(userId, status)
             }
-            onManageCourses={setStudentForCourses}
           />
         )}
       </div>
-      {studentForCourses ? (
-        <StudentCoursePermissionsDialog
-          open
-          onOpenChange={(open) => !open && setStudentForCourses(null)}
-          student={studentForCourses}
-        />
-      ) : null}
     </main>
   )
 }

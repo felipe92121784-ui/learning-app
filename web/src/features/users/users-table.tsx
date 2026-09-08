@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,7 +27,6 @@ interface UsersTableProps {
   pendingUserId: number | null
   statusError: string | null
   onStatusChange: (userId: number, status: UserStatus) => void
-  onManageCourses: (user: ManagedUser) => void
 }
 
 function StatusBadge({ status }: { status: UserStatus }) {
@@ -93,7 +93,6 @@ export function UsersTable({
   pendingUserId,
   statusError,
   onStatusChange,
-  onManageCourses,
 }: UsersTableProps) {
   return (
     <div className="space-y-4">
@@ -137,15 +136,9 @@ export function UsersTable({
                       {user.role === 'STUDENT' ? (
                         <>
                           <Button asChild size="sm" variant="ghost">
-                            <a href={`/admin/users/${user.id}`}>Editar</a>
-                          </Button>
-                          <Button
-                            onClick={() => onManageCourses(user)}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            Cursos e permissões
+                            <Link to="/admin/users/$userId" params={{ userId: String(user.id) }}>
+                              Ver detalhes
+                            </Link>
                           </Button>
                           <StatusAction
                             isPending={pendingUserId === user.id}
