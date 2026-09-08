@@ -278,8 +278,8 @@ function MaterialPermissionRow({
   onAssociationMissing: () => void | Promise<void>
 }) {
   return (
-    <li className="flex flex-col gap-3 border-t py-3 pl-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
+    <li className="flex flex-col gap-3 border-t py-3 sm:flex-row sm:items-center sm:justify-between sm:pl-4">
+      <div className="min-w-0">
         <p className="text-sm font-medium">Material: {material.title}</p>
         <p className="text-xs text-muted-foreground">{material.originalFilename}</p>
       </div>
@@ -308,8 +308,8 @@ function ModulePermissionRow({
 
   return (
     <li className="rounded-md border p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
           <p className="font-medium">Módulo: {module.title}</p>
           {module.description ? (
             <p className="text-sm text-muted-foreground">{module.description}</p>
@@ -366,8 +366,8 @@ function CoursePermissionTree({
 
   return (
     <div className="space-y-4 rounded-md border bg-muted/20 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
           <p className="font-medium">Curso: {association.title}</p>
           <p className="text-sm text-muted-foreground">
             A regra do curso é o padrão para os itens abaixo sem exceção direta.
@@ -478,7 +478,7 @@ export function StudentCoursePermissionsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100vh-2rem)] max-w-5xl overflow-y-auto">
+      <DialogContent className="max-h-[calc(100vh-1rem)] max-w-[calc(100%-1rem)] overflow-y-auto p-4 sm:max-h-[calc(100vh-3rem)] sm:max-w-6xl sm:p-6">
         <DialogHeader>
           <DialogTitle>Cursos e permissões</DialogTitle>
           <DialogDescription>
@@ -548,14 +548,15 @@ export function StudentCoursePermissionsDialog({
           </section>
         ) : (
           <section className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <h3 className="font-medium">Cursos atribuídos</h3>
                 <p className="text-sm text-muted-foreground">
                   Configure exceções apenas quando o aluno precisar fugir da regra do curso.
                 </p>
               </div>
               <Button
+                className="max-sm:w-full"
                 disabled={!associationsReady}
                 onClick={() => setSelectionOpen(true)}
                 type="button"
@@ -584,16 +585,17 @@ export function StudentCoursePermissionsDialog({
             <div className="space-y-3">
               {assigned.map((course) => (
                 <article className="rounded-md border p-4" key={course.id}>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0">
                       <h4 className="font-medium">{course.title}</h4>
                       <p className="text-sm text-muted-foreground">
                         Permissão do curso: {course.permission === 'NONE' ? 'Sem acesso' : course.permission === 'READ' ? 'Leitura' : 'Total'}
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2 max-sm:grid max-sm:grid-cols-2">
                       <Button
                         aria-label={`Configurar ${course.title}`}
+                        className="max-sm:w-full"
                         onClick={() => setConfiguredCourseId((current) => current === course.id ? null : course.id)}
                         size="sm"
                         type="button"
@@ -603,6 +605,7 @@ export function StudentCoursePermissionsDialog({
                       </Button>
                       <Button
                         aria-label={`Remover curso ${course.title}`}
+                        className="max-sm:w-full"
                         onClick={() => setCourseToRemove(course)}
                         size="sm"
                         type="button"

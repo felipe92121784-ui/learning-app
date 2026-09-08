@@ -144,6 +144,18 @@ describe('StudentCoursePermissionsDialog', () => {
     expect(screen.getByRole('button', { name: 'Remover curso Fundamentos de redes' })).toBeTruthy()
   })
 
+  it('uses a wide desktop dialog and keeps course actions adaptable on narrow screens', () => {
+    renderDialog()
+
+    const dialog = screen.getByRole('dialog', { name: 'Cursos e permissões' })
+    expect(dialog.className).toContain('sm:max-w-6xl')
+    expect(dialog.className).toContain('sm:max-h-[calc(100vh-3rem)]')
+
+    const actions = screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }).parentElement
+    expect(actions?.className).toContain('max-sm:grid')
+    expect(actions?.className).toContain('max-sm:grid-cols-2')
+  })
+
   it('opens a searchable course selector without showing assigned courses again', () => {
     renderDialog()
 
