@@ -110,7 +110,7 @@ vi.mock('./access-rules-queries', () => ({
   useUpsertAccessRuleMutation: () => ({ mutateAsync: upsertRule, isPending: false }),
 }))
 
-function renderDialog() {
+function renderDialog({ courseId }: { courseId?: number } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -121,6 +121,7 @@ function renderDialog() {
         open
         onOpenChange={vi.fn()}
         student={{ id: 7, fullName: 'Ada Aluna' }}
+        courseId={courseId}
       />
     </QueryClientProvider>,
   )
@@ -164,6 +165,15 @@ describe('StudentCoursePermissionsDialog', () => {
     const actions = screen.getByRole('button', { name: 'Configurar Fundamentos de redes' }).parentElement
     expect(actions?.className).toContain('max-sm:grid')
     expect(actions?.className).toContain('max-sm:grid-cols-2')
+  })
+
+  it('uses the selected course as the drawer title and moves removal to its footer', () => {
+    renderDialog({ courseId: 9 })
+
+    expect(screen.getByRole('dialog', { name: 'Fundamentos de redes' })).toBeTruthy()
+    expect(screen.queryByText('Cursos atribuídos')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Configurar Fundamentos de redes' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Remover curso' })).toHaveLength(1)
   })
 
   it('opens a searchable course selector without showing assigned courses again', () => {

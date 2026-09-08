@@ -514,6 +514,7 @@ export function StudentCoursePermissionsDialog({
   const assigned = associationsReady
     ? associations.data.filter((course) => !removedCourseIds.has(course.id) && (courseId === undefined || course.id === courseId))
     : []
+  const selectedCourse = courseId === undefined ? null : assigned[0] ?? null
   const availableCourses = useMemo(() => {
     if (!associationsReady) return []
 
@@ -577,8 +578,12 @@ export function StudentCoursePermissionsDialog({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full gap-0 p-0 sm:max-w-[46rem]" side="right">
         <SheetHeader className="shrink-0 border-b px-5 py-5 pr-12 sm:px-6">
-          <SheetTitle>Cursos e permissões</SheetTitle>
-          <SheetDescription>Gerencie o acesso de {student.fullName} a este curso.</SheetDescription>
+          <SheetTitle>{selectedCourse?.title ?? 'Cursos e permissões'}</SheetTitle>
+          <SheetDescription>
+            {selectedCourse
+              ? `Permissões e período de acesso de ${student.fullName}.`
+              : `Gerencie os cursos e permissões de ${student.fullName}.`}
+          </SheetDescription>
         </SheetHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
@@ -645,7 +650,7 @@ export function StudentCoursePermissionsDialog({
           </section>
           ) : (
             <section className="space-y-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            {courseId === undefined ? <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <h3 className="font-medium">Cursos atribuídos</h3>
                 <p className="text-sm text-muted-foreground">
@@ -660,7 +665,7 @@ export function StudentCoursePermissionsDialog({
               >
                 Adicionar curso
               </Button> : null}
-            </div>
+            </div> : null}
             {associations.isPending ? (
               <p className="text-sm text-muted-foreground">Carregando cursos atribuídos…</p>
             ) : null}
@@ -681,8 +686,8 @@ export function StudentCoursePermissionsDialog({
             ) : null}
             <div className="space-y-4">
               {assigned.map((course) => (
-                <article className="rounded-lg border p-4" key={course.id}>
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <article className={courseId === undefined ? 'rounded-lg border p-4' : undefined} key={course.id}>
+                  {courseId === undefined ? <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0">
                       <h4 className="font-medium">{course.title}</h4>
                       <p className="text-sm text-muted-foreground">
@@ -711,9 +716,9 @@ export function StudentCoursePermissionsDialog({
                         Remover curso
                       </Button>
                     </div>
-                  </div>
+                  </div> : null}
                   {configuredCourseId === course.id || courseId === course.id ? (
-                    <div className="mt-5 border-t pt-5">
+                    <div className={courseId === undefined ? 'mt-5 border-t pt-5' : undefined}>
                       <CoursePermissionTree
                         association={course}
                         studentId={student.id}
@@ -740,6 +745,16 @@ export function StudentCoursePermissionsDialog({
         </div>
 
         <SheetFooter className="shrink-0 border-t bg-background px-5 py-4 sm:px-6">
+          {selectedCourse ? (
+            <Button
+              disabled={deleteAssociation.isPending}
+              onClick={() => setCourseToRemove(selectedCourse)}
+              type="button"
+              variant="destructive"
+            >
+              Remover curso
+            </Button>
+          ) : null}
           <Button onClick={() => onOpenChange(false)} type="button" variant="outline">
             Fechar
           </Button>
