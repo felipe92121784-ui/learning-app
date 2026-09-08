@@ -1,4 +1,5 @@
 /* eslint-disable react/only-export-components */
+import { useState } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +15,7 @@ import {
   coursesQueryOptions,
   useCoursesQuery,
 } from '@/features/courses/courses-queries'
+import { CreateCourseDrawer } from '@/features/courses/create-course-drawer'
 import type { CourseStatus } from '@/features/courses/courses-types'
 
 export const Route = createFileRoute('/_admin/admin/courses/')({
@@ -56,6 +58,7 @@ function CoursesRouteError() {
 
 function CoursesPage() {
   const coursesQuery = useCoursesQuery()
+  const [createDrawerOpen, setCreateDrawerOpen] = useState(false)
 
   return (
     <main>
@@ -67,9 +70,7 @@ function CoursesPage() {
             Organize os cursos e seus módulos de aprendizagem.
           </p>
         </div>
-        <Button asChild>
-          <Link to="/admin/courses/new">Novo curso</Link>
-        </Button>
+        <Button type="button" onClick={() => setCreateDrawerOpen(true)}>Novo curso</Button>
       </div>
 
       <div className="mt-8">
@@ -94,9 +95,7 @@ function CoursesPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button asChild>
-                <Link to="/admin/courses/new">Novo curso</Link>
-              </Button>
+              <Button type="button" onClick={() => setCreateDrawerOpen(true)}>Novo curso</Button>
             </CardContent>
           </Card>
         ) : (
@@ -129,6 +128,7 @@ function CoursesPage() {
           </div>
         )}
       </div>
+      <CreateCourseDrawer open={createDrawerOpen} onOpenChange={setCreateDrawerOpen} />
     </main>
   )
 }

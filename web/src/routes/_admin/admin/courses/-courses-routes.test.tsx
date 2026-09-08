@@ -361,14 +361,12 @@ describe("administrative course routes", () => {
     );
   });
 
-  it("uses the full shared content width for course forms", async () => {
+  it("opens the course form in a full-width mobile drawer", async () => {
     stubCourseRequests();
     renderAdminCourses("/admin/courses/new");
 
-    const newCourseCard = (await screen.findByText("Novo curso")).closest(
-      "main",
-    );
-    expect(newCourseCard?.className).not.toContain("max-w-3xl");
+    const newCourseDrawer = await screen.findByRole("dialog");
+    expect(newCourseDrawer.className).toContain("w-full");
     cleanup();
 
     renderAdminCourses("/admin/courses/9");
@@ -376,6 +374,16 @@ describe("administrative course routes", () => {
       "main",
     );
     expect(editCourseCard?.className).not.toContain("max-w-3xl");
+  });
+
+  it("opens the new course drawer from the courses list", async () => {
+    stubCourseRequests();
+    renderAdminCourses();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Novo curso" }));
+
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Novo curso" })).toBeTruthy();
   });
 
   it("keeps deletion confirmation open while pending and refreshes the course after a scoped delete", async () => {
