@@ -13,7 +13,9 @@ interface EnrollmentDates {
 export function defaultEnrollmentDates(now: Date): EnrollmentDates {
   const startDate = saoPauloCalendarDate(now)
   const [year, month, day] = startDate.split('-').map(Number)
-  const endDate = formatCalendarDate(new Date(Date.UTC(year + 1, month - 1, day)))
+  const endYear = year + 1
+  const endDay = Math.min(day, lastDayOfMonth(endYear, month))
+  const endDate = formatCalendarDate(new Date(Date.UTC(endYear, month - 1, endDay)))
 
   return { startDate, endDate }
 }
@@ -71,10 +73,21 @@ function parseSaoPauloBoundary(date: string, boundary: string): Date {
     throw new Error('Enrollment dates must use the YYYY-MM-DD format')
   }
 
+  const [year, month, day] = date.split('-').map(Number)
+  if (day > lastDayOfMonth(year, month)) {
+    throw new Error('Enrollment dates must be valid calendar dates')
+  }
+
   const parsed = new Date(`${date}${boundary}`)
   if (Number.isNaN(parsed.getTime())) {
     throw new Error('Enrollment dates must be valid calendar dates')
   }
 
   return parsed
+}
+
+function lastDayOfMonth(year: number, month: number): number {
+  if (month < 1 || month > 12) return 0
+
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
 }

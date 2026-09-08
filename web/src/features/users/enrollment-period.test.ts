@@ -13,6 +13,13 @@ describe('enrollment period', () => {
     })
   })
 
+  it('uses the last available calendar day for a leap-day enrollment next year', () => {
+    expect(defaultEnrollmentDates(new Date('2024-02-29T12:00:00.000-03:00'))).toEqual({
+      startDate: '2024-02-29',
+      endDate: '2025-02-28',
+    })
+  })
+
   it('converts inclusive Sao Paulo calendar dates to UTC boundaries', () => {
     expect(saoPauloDateRangeToUtc('2026-09-08', '2027-09-08')).toEqual({
       startsAt: '2026-09-08T03:00:00.000Z',
@@ -22,6 +29,10 @@ describe('enrollment period', () => {
 
   it('rejects an end date before the start date', () => {
     expect(() => saoPauloDateRangeToUtc('2026-09-09', '2026-09-08')).toThrow()
+  })
+
+  it.each(['2026-02-29', '2026-02-31'])('rejects the nonexistent calendar date %s', (date) => {
+    expect(() => saoPauloDateRangeToUtc(date, '2026-03-31')).toThrow()
   })
 
   it('formats an enrollment boundary for administrators in Sao Paulo', () => {

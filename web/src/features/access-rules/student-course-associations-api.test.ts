@@ -48,9 +48,16 @@ describe('student course associations API', () => {
     const period = {
       startsAt: '2026-09-10T03:00:00.000Z',
       expiresAt: '2027-09-11T02:59:59.999Z',
+      permission: 'NONE' as const,
     }
     const fetchMock = useApiResponse({
-      data: { ...association, permission: 'FULL', ...period, status: 'SCHEDULED' },
+      data: {
+        ...association,
+        permission: 'FULL',
+        startsAt: period.startsAt,
+        expiresAt: period.expiresAt,
+        status: 'SCHEDULED',
+      },
     })
 
     await expect(
@@ -58,7 +65,8 @@ describe('student course associations API', () => {
     ).resolves.toEqual({
       ...association,
       permission: 'FULL',
-      ...period,
+      startsAt: period.startsAt,
+      expiresAt: period.expiresAt,
       status: 'SCHEDULED',
     })
 
@@ -67,7 +75,11 @@ describe('student course associations API', () => {
     )
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: 'PUT',
-      body: JSON.stringify({ permission: 'FULL', ...period }),
+      body: JSON.stringify({
+        permission: 'FULL',
+        startsAt: period.startsAt,
+        expiresAt: period.expiresAt,
+      }),
     })
   })
 
@@ -76,6 +88,7 @@ describe('student course associations API', () => {
     const period = {
       startsAt: '2026-09-08T03:00:00.000Z',
       expiresAt: '2027-09-09T02:59:59.999Z',
+      permission: 'NONE' as const,
     }
 
     await expect(
@@ -87,7 +100,11 @@ describe('student course associations API', () => {
     )
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: 'POST',
-      body: JSON.stringify({ permission: 'READ', ...period }),
+      body: JSON.stringify({
+        permission: 'READ',
+        startsAt: period.startsAt,
+        expiresAt: period.expiresAt,
+      }),
     })
   })
 

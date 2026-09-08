@@ -35,7 +35,11 @@ export async function updateStudentCourseAssociation(
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ permission, ...period }),
+        body: JSON.stringify({
+          permission,
+          startsAt: period.startsAt,
+          expiresAt: period.expiresAt,
+        }),
       },
     ),
   )
@@ -53,7 +57,11 @@ export async function createStudentCourseAssociation(
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ permission, ...period }),
+        body: JSON.stringify({
+          permission,
+          startsAt: period.startsAt,
+          expiresAt: period.expiresAt,
+        }),
       },
     ),
   )
