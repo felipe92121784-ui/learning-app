@@ -25,6 +25,15 @@ const managedStudent = {
   updatedAt: '2026-09-03T12:00:00.000Z',
 }
 
+const managedAdmin = {
+  ...managedStudent,
+  id: 1,
+  fullName: 'Ada Admin',
+  email: 'admin@example.test',
+  initials: 'AA',
+  role: 'ADMIN' as const,
+}
+
 const association = {
   id: 9,
   title: 'Fundamentos de redes',
@@ -35,6 +44,32 @@ const association = {
   status: 'ACTIVE' as const,
   createdAt: '2026-09-08T12:00:00.000Z',
   updatedAt: null,
+}
+
+function stubDesktopViewport() {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  )
+}
+
+function renderRouter(router: ReturnType<typeof createAppRouter>, queryClient: QueryClient) {
+  render(
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
+    </QueryClientProvider>,
+  )
 }
 
 describe('administrative user routes', () => {
@@ -52,6 +87,24 @@ describe('administrative user routes', () => {
     )
     const router = createAppRouter({
       history: createMemoryHistory({ initialEntries: ['/admin/users'] }),
+      isServer: false,
+      origin: 'http://localhost',
+      queryClient: new QueryClient(),
+    })
+
+    await router.load()
+
+    expect(router.state.location.pathname).toBe('/app')
+  })
+
+  it('inherits the existing ADMIN guard for the direct student detail route', async () => {
+    vi.stubEnv('VITE_API_URL', 'https://api.example.test/api/v1')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ data: { user: student } })),
+    )
+    const router = createAppRouter({
+      history: createMemoryHistory({ initialEntries: ['/admin/users/7'] }),
       isServer: false,
       origin: 'http://localhost',
       queryClient: new QueryClient(),
@@ -98,19 +151,7 @@ describe('administrative user routes', () => {
 
   it('renders the selected student profile, courses and add-course dialog', async () => {
     vi.stubEnv('VITE_API_URL', 'https://api.example.test/api/v1')
-    vi.stubGlobal(
-      'matchMedia',
-      vi.fn().mockImplementation((query: string) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      })),
-    )
+    stubDesktopViewport()
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((input: string | URL) => {
@@ -150,13 +191,7 @@ describe('administrative user routes', () => {
 
     await router.load()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <RouterProvider router={router} />
-        </AuthProvider>
-      </QueryClientProvider>,
-    )
+    renderRouter(router, queryClient)
 
     expect(router.state.location.pathname).toBe('/admin/users/7')
     expect(queryClient.getQueryData(usersQueryKeys.detail(7))).toEqual(
@@ -170,5 +205,75 @@ describe('administrative user routes', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Adicionar curso' }))
     expect(await screen.findByRole('dialog', { name: 'Adicionar curso' })).toBeTruthy()
+  })
+
+  it('keeps the target-role guard and skips course associations for an administrator target', async () => {
+    vi.stubEnv('VITE_API_URL', 'https://api.example.test/api/v1')
+    stubDesktopViewport()
+    const fetchMock = vi.fn().mockImplementation((input: string | URL) => {
+      const url = String(input)
+
+      if (url.endsWith('/users/1')) {
+        return Promise.resolve(Response.json({ data: managedAdmin }))
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(profileQueryKey, { ...student, role: 'ADMIN' })
+    const router = createAppRouter({
+      history: createMemoryHistory({ initialEntries: ['/admin/users/1'] }),
+      isServer: false,
+      origin: 'http://localhost',
+      queryClient,
+    })
+
+    await router.load()
+    renderRouter(router, queryClient)
+
+    expect(await screen.findByText('Apenas alunos podem ser editados nesta área.')).toBeTruthy()
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('/users/1/courses'),
+      expect.anything(),
+    )
+  })
+
+  it('shows a retryable association error without enabling course assignment', async () => {
+    vi.stubEnv('VITE_API_URL', 'https://api.example.test/api/v1')
+    stubDesktopViewport()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((input: string | URL) => {
+        const url = String(input)
+
+        if (url.endsWith('/users/7')) {
+          return Promise.resolve(Response.json({ data: managedStudent }))
+        }
+
+        if (url.endsWith('/users/7/courses')) {
+          return Promise.resolve(new Response(null, { status: 500 }))
+        }
+
+        throw new Error(`Unexpected request: ${url}`)
+      }),
+    )
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    queryClient.setQueryData(profileQueryKey, { ...student, role: 'ADMIN' })
+    const router = createAppRouter({
+      history: createMemoryHistory({ initialEntries: ['/admin/users/7'] }),
+      isServer: false,
+      origin: 'http://localhost',
+      queryClient,
+    })
+
+    await router.load()
+    renderRouter(router, queryClient)
+
+    expect(await screen.findByText('Não foi possível carregar os cursos atribuídos. Tente novamente.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Adicionar curso' })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeTruthy()
   })
 })

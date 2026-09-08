@@ -28,13 +28,15 @@ import { StudentProfileCard } from '@/features/users/student-profile-card'
 export const Route = createFileRoute('/_admin/admin/users/$userId')({
   loader: async ({ context, params }) => {
     const userId = Number(params.userId)
+    const user = await context.queryClient.ensureQueryData(
+      userQueryOptions(userId),
+    )
 
-    await Promise.all([
-      context.queryClient.ensureQueryData(userQueryOptions(userId)),
-      context.queryClient.ensureQueryData(
+    if (user.role === 'STUDENT') {
+      await context.queryClient.prefetchQuery(
         studentCourseAssociationsQueryOptions(userId),
-      ),
-    ])
+      )
+    }
   },
   errorComponent: EditUserRouteError,
   component: EditUserPage,
@@ -57,9 +59,7 @@ function EditUserPage() {
   const userId = Number(userIdParam)
   const navigate = useNavigate()
   const userQuery = useUserQuery(userId)
-  const associationsQuery = useStudentCourseAssociationsQuery(userId)
   const updateMutation = useUpdateUserMutation()
-  const [addCourseOpen, setAddCourseOpen] = useState(false)
 
   function handleSubmit(input: UpdateUserInput) {
     updateMutation.mutate(
@@ -90,45 +90,7 @@ function EditUserPage() {
         </Alert>
       ) : (
         <div className="space-y-8">
-          <StudentProfileCard
-            courseCount={associationsQuery.data?.length ?? 0}
-            student={userQuery.data}
-          />
-
-          <section aria-labelledby="student-courses-heading" className="space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-xl font-semibold" id="student-courses-heading">
-                  Cursos atribuídos
-                </h2>
-                <p className="text-sm text-slate-600">
-                  Gerencie o acesso deste aluno por curso.
-                </p>
-              </div>
-              <Button
-                disabled={associationsQuery.isPending}
-                onClick={() => setAddCourseOpen(true)}
-                type="button"
-              >
-                Adicionar curso
-              </Button>
-            </div>
-
-            {associationsQuery.isPending ? (
-              <p className="text-sm text-slate-600">Carregando cursos…</p>
-            ) : associationsQuery.isError ? (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  Não foi possível carregar os cursos atribuídos. Tente novamente.
-                </AlertDescription>
-              </Alert>
-            ) : (
-              <StudentCourseCards
-                associations={associationsQuery.data}
-                student={userQuery.data}
-              />
-            )}
-          </section>
+          <StudentCourseDetails student={userQuery.data} />
 
           <Card>
             <CardHeader>
@@ -150,15 +112,76 @@ function EditUserPage() {
               />
             </CardContent>
           </Card>
-
-          <AddStudentCourseDialog
-            associations={associationsQuery.data ?? []}
-            open={addCourseOpen}
-            onOpenChange={setAddCourseOpen}
-            studentId={userId}
-          />
         </div>
       )}
     </main>
+  )
+}
+
+function StudentCourseDetails({
+  student,
+}: {
+  student: NonNullable<ReturnType<typeof useUserQuery>['data']>
+}) {
+  const associationsQuery = useStudentCourseAssociationsQuery(student.id)
+  const [addCourseOpen, setAddCourseOpen] = useState(false)
+  const associationsReady = associationsQuery.isSuccess
+
+  return (
+    <>
+      <StudentProfileCard
+        courseCount={associationsQuery.data?.length ?? 0}
+        student={student}
+      />
+
+      <section aria-labelledby="student-courses-heading" className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold" id="student-courses-heading">
+              Cursos atribuídos
+            </h2>
+            <p className="text-sm text-slate-600">
+              Gerencie o acesso deste aluno por curso.
+            </p>
+          </div>
+          <Button
+            disabled={!associationsReady}
+            onClick={() => setAddCourseOpen(true)}
+            type="button"
+          >
+            Adicionar curso
+          </Button>
+        </div>
+
+        {associationsQuery.isPending ? (
+          <p className="text-sm text-slate-600">Carregando cursos…</p>
+        ) : associationsQuery.isError ? (
+          <Alert variant="destructive">
+            <AlertDescription className="flex items-center justify-between gap-3">
+              <span>Não foi possível carregar os cursos atribuídos. Tente novamente.</span>
+              <Button
+                onClick={() => void associationsQuery.refetch()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Tentar novamente
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : associationsReady ? (
+          <StudentCourseCards associations={associationsQuery.data} student={student} />
+        ) : null}
+      </section>
+
+      {associationsReady ? (
+        <AddStudentCourseDialog
+          associations={associationsQuery.data}
+          open={addCourseOpen}
+          onOpenChange={setAddCourseOpen}
+          studentId={student.id}
+        />
+      ) : null}
+    </>
   )
 }
