@@ -42,12 +42,14 @@ describe('UsersTable', () => {
   afterEach(cleanup)
 
   it('renders translated status badges and actions only for students', () => {
+    const onManageCourses = vi.fn()
     render(
       <UsersTable
         pendingUserId={null}
         statusError={null}
         users={users}
         onStatusChange={vi.fn()}
+        onManageCourses={onManageCourses}
       />,
     )
 
@@ -61,6 +63,10 @@ describe('UsersTable', () => {
     expect(
       within(activeRow).getByRole('button', { name: 'Bloquear' }),
     ).toBeTruthy()
+    fireEvent.click(
+      within(activeRow).getByRole('button', { name: 'Cursos e permissões' }),
+    )
+    expect(onManageCourses).toHaveBeenCalledWith(users[1])
 
     const blockedRow = screen.getByRole('row', { name: /Blocked Student/ })
     expect(
@@ -76,6 +82,7 @@ describe('UsersTable', () => {
         statusError={null}
         users={users}
         onStatusChange={onStatusChange}
+        onManageCourses={vi.fn()}
       />,
     )
 
@@ -99,6 +106,7 @@ describe('UsersTable', () => {
         statusError="Não foi possível alterar o status."
         users={users}
         onStatusChange={vi.fn()}
+        onManageCourses={vi.fn()}
       />,
     )
 

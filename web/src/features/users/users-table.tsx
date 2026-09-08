@@ -26,6 +26,7 @@ interface UsersTableProps {
   pendingUserId: number | null
   statusError: string | null
   onStatusChange: (userId: number, status: UserStatus) => void
+  onManageCourses: (user: ManagedUser) => void
 }
 
 function StatusBadge({ status }: { status: UserStatus }) {
@@ -92,6 +93,7 @@ export function UsersTable({
   pendingUserId,
   statusError,
   onStatusChange,
+  onManageCourses,
 }: UsersTableProps) {
   return (
     <div className="space-y-4">
@@ -136,6 +138,14 @@ export function UsersTable({
                         <>
                           <Button asChild size="sm" variant="ghost">
                             <a href={`/admin/users/${user.id}`}>Editar</a>
+                          </Button>
+                          <Button
+                            onClick={() => onManageCourses(user)}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            Cursos e permissões
                           </Button>
                           <StatusAction
                             isPending={pendingUserId === user.id}
