@@ -1,4 +1,5 @@
 import { apiClient } from '@/lib/api-client'
+import type { EnrollmentPeriodInput } from '@/features/users/enrollment-period'
 import type { CoursePermission } from './course-permission'
 import type { StudentCourseAssociation } from './student-course-associations-types'
 
@@ -26,6 +27,7 @@ export async function updateStudentCourseAssociation(
   userId: number,
   courseId: number,
   permission: CoursePermission,
+  period: EnrollmentPeriodInput,
 ): Promise<StudentCourseAssociation> {
   return requireData(
     await apiClient<ApiEnvelope<StudentCourseAssociation>>(
@@ -33,7 +35,7 @@ export async function updateStudentCourseAssociation(
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ permission }),
+        body: JSON.stringify({ permission, ...period }),
       },
     ),
   )
@@ -43,6 +45,7 @@ export async function createStudentCourseAssociation(
   userId: number,
   courseId: number,
   permission: CoursePermission,
+  period: EnrollmentPeriodInput,
 ): Promise<StudentCourseAssociation> {
   return requireData(
     await apiClient<ApiEnvelope<StudentCourseAssociation>>(
@@ -50,7 +53,7 @@ export async function createStudentCourseAssociation(
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ permission }),
+        body: JSON.stringify({ permission, ...period }),
       },
     ),
   )

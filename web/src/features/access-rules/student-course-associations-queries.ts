@@ -6,6 +6,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query'
 import { studentCatalogKeys } from '@/features/student-catalog/student-catalog-queries'
+import type { EnrollmentPeriodInput } from '@/features/users/enrollment-period'
 import { accessRulesQueryKeys } from './access-rules-queries'
 import {
   createStudentCourseAssociation,
@@ -49,20 +50,22 @@ interface UpdateStudentCourseAssociationVariables {
   userId: number
   courseId: number
   permission: CoursePermission
+  period: EnrollmentPeriodInput
 }
 
 interface CreateStudentCourseAssociationVariables {
   userId: number
   courseId: number
   permission: CoursePermission
+  period: EnrollmentPeriodInput
 }
 
 export function useCreateStudentCourseAssociationMutation() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ userId, courseId, permission }: CreateStudentCourseAssociationVariables) =>
-      createStudentCourseAssociation(userId, courseId, permission),
+    mutationFn: ({ userId, courseId, permission, period }: CreateStudentCourseAssociationVariables) =>
+      createStudentCourseAssociation(userId, courseId, permission, period),
     onSuccess: async (_association, { userId }) => {
       await refreshAssociatedCourseData(queryClient, userId)
     },
@@ -73,8 +76,8 @@ export function useUpdateStudentCourseAssociationMutation() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ userId, courseId, permission }: UpdateStudentCourseAssociationVariables) =>
-      updateStudentCourseAssociation(userId, courseId, permission),
+    mutationFn: ({ userId, courseId, permission, period }: UpdateStudentCourseAssociationVariables) =>
+      updateStudentCourseAssociation(userId, courseId, permission, period),
     onSuccess: async (_association, { userId }) => {
       await refreshAssociatedCourseData(queryClient, userId)
     },

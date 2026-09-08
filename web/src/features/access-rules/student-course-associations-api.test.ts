@@ -11,8 +11,10 @@ const association = {
   id: 7,
   title: 'Metrologia',
   description: 'Fundamentos',
-  status: 'DRAFT',
+  status: 'ACTIVE',
   permission: 'READ',
+  startsAt: '2026-09-08T03:00:00.000Z',
+  expiresAt: '2027-09-09T02:59:59.999Z',
   createdAt: '2026-09-04T12:00:00.000Z',
   updatedAt: null,
 } satisfies StudentCourseAssociation
@@ -42,33 +44,50 @@ describe('student course associations API', () => {
     )
   })
 
-  it('puts the selected direct course permission and unwraps the association', async () => {
-    const fetchMock = useApiResponse({ data: { ...association, permission: 'FULL' } })
+  it('puts the selected direct course permission and period and unwraps the association', async () => {
+    const period = {
+      startsAt: '2026-09-10T03:00:00.000Z',
+      expiresAt: '2027-09-11T02:59:59.999Z',
+    }
+    const fetchMock = useApiResponse({
+      data: { ...association, permission: 'FULL', ...period, status: 'SCHEDULED' },
+    })
 
     await expect(
-      updateStudentCourseAssociation(12, 7, 'FULL'),
-    ).resolves.toEqual({ ...association, permission: 'FULL' })
+      updateStudentCourseAssociation(12, 7, 'FULL', period),
+    ).resolves.toEqual({
+      ...association,
+      permission: 'FULL',
+      ...period,
+      status: 'SCHEDULED',
+    })
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       'https://api.example.test/api/v1/users/12/courses/7',
     )
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: 'PUT',
-      body: JSON.stringify({ permission: 'FULL' }),
+      body: JSON.stringify({ permission: 'FULL', ...period }),
     })
   })
 
   it('posts an explicit course association and unwraps it', async () => {
     const fetchMock = useApiResponse({ data: association })
+    const period = {
+      startsAt: '2026-09-08T03:00:00.000Z',
+      expiresAt: '2027-09-09T02:59:59.999Z',
+    }
 
-    await expect(createStudentCourseAssociation(12, 7, 'READ')).resolves.toEqual(association)
+    await expect(
+      createStudentCourseAssociation(12, 7, 'READ', period),
+    ).resolves.toEqual(association)
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       'https://api.example.test/api/v1/users/12/courses/7',
     )
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: 'POST',
-      body: JSON.stringify({ permission: 'READ' }),
+      body: JSON.stringify({ permission: 'READ', ...period }),
     })
   })
 
