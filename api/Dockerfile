@@ -7,6 +7,9 @@ RUN npm ci
 FROM dependencies AS build
 
 COPY . .
+# .adonisjs/ is gitignored, so regenerate the server indexes and the Tuyau
+# client registry before tsc runs (node ace build alone skips the registry).
+RUN node ace codegen
 RUN npm run build
 
 FROM node:24-bookworm-slim AS production-dependencies
