@@ -38,6 +38,7 @@ services:
         condition: service_healthy
     networks:
       - internal
+      - edge
 
   api:
     image: ideal-learning-api:production
@@ -119,3 +120,8 @@ volumes:
 networks:
   internal:
     internal: true
+  # Public edge network: only the web/Caddy container joins it so Docker can
+  # publish its host port. Docker refuses to publish ports for a container
+  # attached solely to an "internal: true" network.
+  edge:
+    driver: bridge
